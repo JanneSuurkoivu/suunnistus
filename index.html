@@ -1,0 +1,1354 @@
+<!doctype html>
+<html lang="fi">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Kartta</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+#map {
+  height: 100vh;
+  width: 100vw;
+  background: #222;
+}
+
+.start-icon svg {
+  overflow: visible;
+}
+
+#timer {
+  font-weight: bold;
+  margin-left: 8px;
+}
+
+#eventStatus {
+  margin: 4px 0 8px 0;
+  font-size: 13px;
+}
+
+#splitList {
+  padding-left: 20px;
+  margin: 6px 0 0 0;
+}
+
+#eventLogList {
+  padding-left: 20px;
+  margin: 6px 0 0 0;
+}
+
+#sidebar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  bottom: 10px;
+  width: 280px;
+  z-index: 1000;
+  background: white;
+  border-radius: 10px;
+  padding: 10px;
+  font-family: Arial, sans-serif;
+  overflow-y: auto;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+}
+
+.panel-section {
+  margin-bottom: 14px;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 10px;
+}
+
+.panel-section:last-child {
+  border-bottom: none;
+}
+
+.panel-section b {
+  display: block;
+  margin-bottom: 6px;
+}
+
+#sidebar button {
+  margin: 3px 3px 3px 0;
+  padding: 6px 8px;
+}
+
+#timer {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.control-number {
+  color: #b000ff;
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow:
+    -1px -1px 0 white,
+     1px -1px 0 white,
+    -1px  1px 0 white,
+     1px  1px 0 white;
+}
+
+.pdf-report-box {
+  background: rgba(255,255,255,0.92);
+  padding: 10px;
+  border: 2px solid #333;
+  border-radius: 8px;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  max-width: 230px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+body.pdf-export .leaflet-top.leaflet-left {
+  top: 5cm !important;
+  left: 3cm !important;
+}
+
+.pdf-report-box h3 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+}
+
+.pdf-report-box ul {
+  margin: 5px 0 0 18px;
+  padding: 0;
+}
+
+body.pdf-export #sidebar {
+  display: none;
+}
+
+body.pdf-export #map {
+  width: 794px !important;
+  height: 1123px !important;
+  background: white !important;
+  margin: 0 !important;
+}
+
+body.pdf-export .leaflet-control-zoom {
+  display: none;
+}
+
+body.pdf-export .leaflet-interactive {
+  stroke-width: 2 !important;
+}
+
+body.pdf-export .control-number {
+  font-size: 14px;
+}
+
+body.pdf-export .pdf-report-box {
+  font-size: 11px;
+  max-width: 180px;
+  padding: 6px;
+}
+  </style>
+</head>
+
+<body>
+  <div id="sidebar">
+    <div class="panel-section">
+      <b>Ajanotto</b>
+      <button id="prepGpsBtn">Valmistele GPS</button>
+      <button id="simGpsBtn">Simuloi GPS</button>
+      <button id="startBtn">Aloita</button>
+      <button id="stopBtn">Pysäytä</button>
+      <button id="resetBtn">Nollaa</button>
+      <span id="timer">00:00:00.00</span>
+    </div>
+
+    <div class="panel-section">
+      <b>Karttakuva</b>
+      <input type="file" id="mapImageInput" accept="image/*">
+      <button id="fitMapBtn">Sovita kartta</button>
+
+      <div id="eventNameBox" style="display:none; margin-top:8px;">
+        <b>Tapahtuman nimi</b>
+        <input type="text" id="eventNameInput" placeholder="Esim. Iltarastit Vaskiluoto" style="width:95%;">
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <b>Radan pisteet</b>
+      <button id="addStartBtn">Lisää lähtö</button>
+      <button id="addControlBtn">Lisää rasti</button>
+      <button id="addFinishBtn">Lisää maali</button>
+      <button id="undoPointBtn">Poista viimeisin piste</button>
+    </div>
+
+    <div class="panel-section">
+      <b>Tapahtuma</b>
+      <div id="eventStatus">Ei käynnissä</div>
+      <b>Väliajat</b>
+      <ul id="splitList"></ul>
+    </div>
+
+   <div class="panel-section">
+  <b>Tapahtumaloki</b>
+  <ul id="eventLogList"></ul>
+  <button id="clearEventLogBtn">Tyhjennä tallennetut</button>
+</div>
+
+    <button id="exportPdfBtn">Vie PDF</button>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <script>
+let eventName = "";
+
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -2,
+  maxZoom: 4,
+  preferCanvas: true
+});
+
+const lineRenderer = L.canvas({
+  padding: 0.5
+});
+
+let imageBounds = [[0, 0], [1000, 1000]];
+map.fitBounds(imageBounds);
+
+setTimeout(() => {
+  map.zoomIn(1);
+}, 100);
+
+let imageOverlay = null;
+let currentMapImageData = null;
+
+const controlIcon = L.divIcon({
+  className: 'control-icon',
+  html: `
+    <svg width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="11" fill="none" stroke="#b000ff" stroke-width="4" />
+    </svg>
+  `,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17]
+});
+
+const finishIcon = L.divIcon({
+  className: 'finish-icon',
+  html: `
+    <svg width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="11" fill="none" stroke="#b000ff" stroke-width="4" />
+      <circle cx="17" cy="17" r="5" fill="none" stroke="#b000ff" stroke-width="4" />
+    </svg>
+  `,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17]
+});
+
+let route = L.polyline([], {
+  color: 'red',
+  weight: 4,
+  renderer: lineRenderer
+}).addTo(map);
+
+let addMode = null;
+let controlNumber = 1;
+let coursePoints = [];
+let courseMarkers = [];
+let coursePointMarkerGroups = [];
+let courseLine = L.layerGroup().addTo(map);
+
+let timerRunning = false;
+let startTime = null;
+let timerInterval = null;
+let currentEvent = null;
+let eventLog = [];
+
+const CONTROL_HIT_RADIUS = 35;
+let gpsReady = false;
+let lastPosition = null;
+let watchId = null;
+let gpsMarker = null;
+
+let simGpsInterval = null;
+let simIndex = 0;
+let simulatedRoutePoints = [];
+
+document.getElementById('fitMapBtn').addEventListener('click', () => {
+  map.fitBounds(imageBounds);
+});
+
+document.getElementById('mapImageInput').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+
+reader.onload = () => {
+  resizeImageForStorage(reader.result, 1600, (smallImageData) => {
+    currentMapImageData = smallImageData;
+    loadMapImageFromData(currentMapImageData);
+  });
+};
+
+reader.readAsDataURL(file);
+});
+
+function resizeImageForStorage(imageData, maxSize, callback) {
+  const img = new Image();
+
+  img.onload = () => {
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+
+    const scale = Math.min(1, maxSize / Math.max(w, h));
+
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const compressedData = canvas.toDataURL('image/jpeg', 0.75);
+    callback(compressedData);
+  };
+
+  img.src = imageData;
+}
+
+
+function loadMapImageFromData(imageData) {
+  if (!imageData) return;
+
+  const img = new Image();
+
+  img.onload = () => {
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+
+    imageBounds = [[0, 0], [h, w]];
+
+    if (imageOverlay) {
+      map.removeLayer(imageOverlay);
+    }
+
+    imageOverlay = L.imageOverlay(imageData, imageBounds).addTo(map);
+    map.fitBounds(imageBounds);
+
+    document.getElementById('eventNameBox').style.display = "block";
+    document.getElementById('eventNameInput').focus();
+
+    document.getElementById('eventStatus').textContent =
+      "Karttakuva ladattu. Lisää lähtö, rastit ja maali.";
+  };
+
+  img.src = imageData;
+}
+
+document.getElementById('clearEventLogBtn').addEventListener('click', () => {
+  clearSavedEvents();
+});
+
+document.getElementById('addStartBtn').addEventListener('click', () => {
+  const startExists = coursePoints.some(point => point.type === "start");
+
+  if (startExists) {
+    alert("Lähtö on jo lisätty.");
+    return;
+  }
+
+  addMode = "start";
+});
+
+document.getElementById('addControlBtn').addEventListener('click', () => {
+  addMode = "control";
+});
+
+document.getElementById('addFinishBtn').addEventListener('click', () => {
+  const finishExists = coursePoints.some(point => point.type === "finish");
+
+  if (finishExists) {
+    alert("Maali on jo lisätty.");
+    return;
+  }
+
+  addMode = "finish";
+});
+
+document.getElementById('undoPointBtn').addEventListener('click', () => {
+  undoLastCoursePoint();
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  if (timerRunning) return;
+
+  timerRunning = true;
+  startTime = Date.now();
+  startEvent();
+
+  timerInterval = setInterval(() => {
+    const elapsedMs = Date.now() - startTime;
+    document.getElementById('timer').textContent = formatTime(elapsedMs);
+  }, 50);
+});
+
+document.getElementById('stopBtn').addEventListener('click', () => {
+  timerRunning = false;
+  clearInterval(timerInterval);
+  clearInterval(simGpsInterval);
+  finishEvent();
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  resetCurrentView();
+});
+
+document.getElementById('prepGpsBtn').addEventListener('click', () => {
+  startGpsTracking();
+});
+
+document.getElementById('simGpsBtn').addEventListener('click', () => {
+  startGpsSimulation();
+});
+
+document.getElementById('eventNameInput').addEventListener('input', (e) => {
+  eventName = e.target.value;
+});
+
+document.getElementById('exportPdfBtn').addEventListener('click', () => {
+  exportPdf();
+});
+
+function formatTime(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const hundredths = Math.floor((ms % 1000) / 10);
+
+  return String(hours).padStart(2, '0') + ':' +
+         String(minutes).padStart(2, '0') + ':' +
+         String(seconds).padStart(2, '0') + '.' +
+         String(hundredths).padStart(2, '0');
+}
+
+function addPoint(lat, lon) {
+  route.addLatLng([lat, lon]);
+
+  if (currentEvent) {
+    currentEvent.routePoints.push({
+      lat: lat,
+      lon: lon,
+      time: Date.now() - startTime
+    });
+  }
+}
+
+function shortenLineSegment(p1, p2, cut) {
+  const dx = p2.lon - p1.lon;
+  const dy = p2.lat - p1.lat;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance <= cut * 2) {
+    return null;
+  }
+
+  const ratio = cut / distance;
+
+  return [
+    [p1.lat + dy * ratio, p1.lon + dx * ratio],
+    [p2.lat - dy * ratio, p2.lon - dx * ratio]
+  ];
+}
+
+function updateCourseLine(cut = 12) {
+  courseLine.clearLayers();
+
+  for (let i = 0; i < coursePoints.length - 1; i++) {
+    const p1 = coursePoints[i];
+    const p2 = coursePoints[i + 1];
+
+    let segment = shortenLineSegment(p1, p2, cut);
+
+    if (!segment) {
+      segment = [
+        [p1.lat, p1.lon],
+        [p2.lat, p2.lon]
+      ];
+    }
+
+    L.polyline(segment, {
+      color: '#b000ff',
+      weight: 3,
+      opacity: 0.9,
+      dashArray: null,
+      lineCap: 'round',
+      lineJoin: 'round',
+      renderer: lineRenderer
+    }).addTo(courseLine);
+  }
+}
+
+function createStartIcon(size = 34) {
+  const c = size / 2;
+  const s = size / 34;
+
+  return L.divIcon({
+    className: 'start-icon',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <polygon
+          points="${17 * s},${4 * s} ${30 * s},${28 * s} ${4 * s},${28 * s}"
+          fill="none"
+          stroke="#b000ff"
+          stroke-width="${4 * s}"
+          stroke-linejoin="round"
+        />
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [c, c]
+  });
+}
+
+function createControlIcon(size = 34) {
+  const center = size / 2;
+  const s = size / 34;
+
+  return L.divIcon({
+    className: 'control-icon',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${center}" cy="${center}" r="${11 * s}" fill="none" stroke="#b000ff" stroke-width="${4 * s}" />
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [center, center]
+  });
+}
+
+function createFinishIcon(size = 34) {
+  const center = size / 2;
+  const s = size / 34;
+
+  return L.divIcon({
+    className: 'finish-icon',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${center}" cy="${center}" r="${11 * s}" fill="none" stroke="#b000ff" stroke-width="${4 * s}" />
+        <circle cx="${center}" cy="${center}" r="${5 * s}" fill="none" stroke="#b000ff" stroke-width="${4 * s}" />
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [center, center]
+  });
+}
+
+function updateStartDirection(size = 34) {
+  const startIndex = coursePoints.findIndex(p => p.type === "start");
+  const firstControl = coursePoints.find(p => p.type === "control");
+
+  if (startIndex === -1 || !firstControl) return;
+
+  const markerGroup = coursePointMarkerGroups[startIndex];
+  if (!markerGroup || !markerGroup[0]) return;
+
+  markerGroup[0].setIcon(
+    createStartIconTowards(coursePoints[startIndex], firstControl, size)
+  );
+}
+
+function createStartIconTowards(startPoint, targetPoint, size = 34) {
+  const c = size / 2;
+  const s = size / 34;
+
+  const dx = targetPoint.lon - startPoint.lon;
+  const dy = -(targetPoint.lat - startPoint.lat);
+
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+
+  const ux = dx / len;
+  const uy = dy / len;
+
+  const tipX = c + ux * 13 * s;
+  const tipY = c + uy * 13 * s;
+
+  const backX = c - ux * 10 * s;
+  const backY = c - uy * 10 * s;
+
+  const sideX = -uy;
+  const sideY = ux;
+
+  const base1X = backX + sideX * 10 * s;
+  const base1Y = backY + sideY * 10 * s;
+
+  const base2X = backX - sideX * 10 * s;
+  const base2Y = backY - sideY * 10 * s;
+
+  return L.divIcon({
+    className: 'start-icon',
+    html: `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <polygon
+          points="${tipX},${tipY} ${base1X},${base1Y} ${base2X},${base2Y}"
+          fill="none"
+          stroke="#b000ff"
+          stroke-width="${4 * s}"
+          stroke-linejoin="round"
+        />
+      </svg>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [c, c]
+  });
+}
+
+map.on('click', (e) => {
+  if (!addMode) return;
+
+  const lat = e.latlng.lat;
+  const lon = e.latlng.lng;
+
+  const markerGroup = [];
+
+  if (addMode === "start") {
+    const marker = L.marker([lat, lon], { icon: createStartIcon() })
+      .addTo(map)
+      .bindPopup("Lähtö");
+
+    courseMarkers.push(marker);
+    markerGroup.push(marker);
+
+    coursePoints.push({
+      type: "start",
+      name: "Lähtö",
+      lat: lat,
+      lon: lon,
+      visited: false
+    });
+  }
+
+  if (addMode === "control") {
+    const name = "Rasti " + controlNumber;
+
+    const marker = L.marker([lat, lon], { icon: controlIcon })
+      .addTo(map)
+      .bindPopup(name);
+
+    courseMarkers.push(marker);
+    markerGroup.push(marker);
+
+    const numberIcon = L.divIcon({
+      className: 'control-number',
+      html: controlNumber,
+      iconSize: [34, 34],
+      iconAnchor: [-18, 18]
+    });
+
+    const numberMarker = L.marker([lat, lon], {
+      icon: numberIcon,
+      interactive: false
+    }).addTo(map);
+
+    courseMarkers.push(numberMarker);
+    markerGroup.push(numberMarker);
+
+    coursePoints.push({
+      type: "control",
+      name: name,
+      lat: lat,
+      lon: lon,
+      visited: false
+    });
+
+    controlNumber++;
+  }
+
+  if (addMode === "finish") {
+    const marker = L.marker([lat, lon], { icon: finishIcon })
+      .addTo(map)
+      .bindPopup("Maali");
+
+    courseMarkers.push(marker);
+    markerGroup.push(marker);
+
+    coursePoints.push({
+      type: "finish",
+      name: "Maali",
+      lat: lat,
+      lon: lon,
+      visited: false
+    });
+  }
+
+  coursePointMarkerGroups.push(markerGroup);
+
+	updateCourseLine();
+	updateStartDirection();
+	saveCurrentCourse();
+
+addMode = null;
+});
+
+function undoLastCoursePoint() {
+  if (coursePoints.length === 0) return;
+
+  const removedPoint = coursePoints.pop();
+  const markerGroup = coursePointMarkerGroups.pop();
+
+  if (markerGroup) {
+    markerGroup.forEach(marker => {
+      map.removeLayer(marker);
+    });
+  }
+
+  courseMarkers = courseMarkers.filter(marker => !markerGroup.includes(marker));
+
+  if (removedPoint.type === "control") {
+    controlNumber = Math.max(1, controlNumber - 1);
+  }
+
+	updateCourseLine();
+	updateStartDirection();
+	saveCurrentCourse();
+}
+
+function addSplit(name, timeText) {
+  const li = document.createElement('li');
+  li.textContent = name + " - " + timeText;
+  document.getElementById('splitList').appendChild(li);
+}
+
+function startEvent() {
+  const typedEventName = document.getElementById('eventNameInput').value.trim();
+
+  currentEvent = {
+    name: typedEventName || "Nimetön tapahtuma",
+    date: new Date().toISOString(),
+    totalTime: null,
+    splits: [],
+    routePoints: [],
+    coursePoints: JSON.parse(JSON.stringify(coursePoints)),
+    mapImageData: currentMapImageData,
+    mapImageBounds: JSON.parse(JSON.stringify(imageBounds))
+  };
+
+  document.getElementById('splitList').innerHTML = "";
+  document.getElementById('eventStatus').textContent = "Käynnissä";
+
+  currentEvent.splits.push({
+    name: "Lähtö",
+    time: "00:00:00.00",
+    elapsedMs: 0
+  });
+
+  addSplit("Lähtö", "00:00:00.00");
+}
+
+function finishEvent() {
+  if (!currentEvent) return;
+  if (currentEvent.totalTime) return;
+
+  const totalMs = Date.now() - startTime;
+  const totalTimeText = formatTime(totalMs);
+
+  currentEvent.totalTime = totalTimeText;
+
+  document.getElementById('eventStatus').textContent =
+    "Valmis - kokonaisaika " + totalTimeText;
+
+  saveEventToLog();
+}
+
+function saveEventToLog() {
+  if (!currentEvent || !currentEvent.totalTime) return;
+
+  eventLog.push(currentEvent);
+  saveEventLogToStorage();
+  renderEventLog();
+}
+
+function renderEventLog() {
+  const list = document.getElementById("eventLogList");
+  list.innerHTML = "";
+
+  eventLog.forEach((event, index) => {
+    const li = document.createElement('li');
+
+    const text = document.createElement('span');
+    text.textContent = event.name + " - " + event.totalTime + " ";
+
+    const showBtn = document.createElement("button");
+    showBtn.textContent = "Näytä";
+    showBtn.addEventListener('click', () => {
+      showSavedEvent(index);
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = "Poista";
+    deleteBtn.addEventListener('click', () => {
+      eventLog.splice(index, 1);
+      saveEventLogToStorage();
+      renderEventLog();
+    });
+
+    li.appendChild(text);
+    li.appendChild(showBtn);
+    li.appendChild(deleteBtn);
+    list.appendChild(li);
+  });
+}
+
+function showSavedEvent(index) {
+  const event = eventLog[index];
+  if (!event) return;
+
+  timerRunning = false;
+  clearInterval(timerInterval);
+  clearInterval(simGpsInterval);
+
+  currentEvent = event;
+
+  if (event.mapImageData) {
+    currentMapImageData = event.mapImageData;
+    loadMapImageFromData(event.mapImageData);
+  } else if (event.mapImageBounds) {
+    imageBounds = event.mapImageBounds;
+  }
+
+  if (event.coursePoints && event.coursePoints.length > 0) {
+    drawCourseFromPoints(event.coursePoints);
+  }
+
+  route.setLatLngs([]);
+
+  if (event.routePoints && event.routePoints.length > 0) {
+    const latlngs = event.routePoints.map(p => [p.lat, p.lon]);
+    route.setLatLngs(latlngs);
+  }
+
+  document.getElementById('splitList').innerHTML = "";
+
+  if (event.splits && event.splits.length > 0) {
+    event.splits.forEach(split => {
+      addSplit(split.name, split.time);
+    });
+  }
+
+  document.getElementById('eventStatus').textContent =
+    "Tallennettu tapahtuma - kokonaisaika " + event.totalTime;
+
+  document.getElementById('timer').textContent =
+    event.totalTime || "00:00:00.00";
+
+  map.fitBounds(imageBounds);
+}
+
+function saveEventLogToStorage() {
+  try {
+    localStorage.setItem("suunnistus_eventLog", JSON.stringify(eventLog));
+  } catch (err) {
+    console.error("Tallennus epäonnistui:", err);
+    alert("Tallennus epäonnistui. Karttakuva on todennäköisesti liian iso.");
+  }
+}
+
+function saveCurrentCourse() {
+  const courseData = {
+    coursePoints: coursePoints,
+    mapImageData: currentMapImageData,
+    imageBounds: imageBounds,
+    controlNumber: controlNumber
+  };
+
+  localStorage.setItem(
+    "suunnistus_currentCourse",
+    JSON.stringify(courseData)
+  );
+}
+
+function loadEventLogFromStorage() {
+  const saved = localStorage.getItem("suunnistus_eventLog");
+
+  if (saved) {
+    eventLog = JSON.parse(saved);
+    renderEventLog();
+  }
+}
+
+function clearEventLogStorage() {
+  localStorage.removeItem("suunnistus_eventLog");
+}
+
+function clearCourseMarkersOnly() {
+  courseLine.clearLayers();
+
+  courseMarkers.forEach(marker => {
+    map.removeLayer(marker);
+  });
+
+  courseMarkers = [];
+  coursePointMarkerGroups = [];
+}
+
+function clearSavedEvents() {
+  const ok = confirm("Haluatko varmasti poistaa kaikki tallennetut tapahtumat?");
+
+  if (!ok) return;
+
+  eventLog = [];
+  currentEvent = null;
+
+  clearEventLogStorage();
+  renderEventLog();
+
+  document.getElementById('eventStatus').textContent =
+    "Tallennetut tapahtumat tyhjennetty.";
+}
+
+function drawCourseFromPoints(points) {
+  clearCourseMarkersOnly();
+
+  coursePoints = JSON.parse(JSON.stringify(points || []));
+  coursePointMarkerGroups = [];
+  courseMarkers = [];
+
+  let maxControlNumber = 0;
+
+  coursePoints.forEach((point) => {
+    const markerGroup = [];
+
+    if (point.type === "start") {
+      const marker = L.marker([point.lat, point.lon], { icon: createStartIcon() })
+        .addTo(map)
+        .bindPopup("Lähtö");
+
+      courseMarkers.push(marker);
+      markerGroup.push(marker);
+    }
+
+    if (point.type === "control") {
+      const match = point.name.match(/\d+/);
+      const number = match ? parseInt(match[0], 10) : 0;
+      maxControlNumber = Math.max(maxControlNumber, number);
+
+      const marker = L.marker([point.lat, point.lon], { icon: controlIcon })
+        .addTo(map)
+        .bindPopup(point.name);
+
+      courseMarkers.push(marker);
+      markerGroup.push(marker);
+
+      const numberIcon = L.divIcon({
+        className: 'control-number',
+        html: number || "",
+        iconSize: [34, 34],
+        iconAnchor: [-18, 18]
+      });
+
+      const numberMarker = L.marker([point.lat, point.lon], {
+        icon: numberIcon,
+        interactive: false
+      }).addTo(map);
+
+      courseMarkers.push(numberMarker);
+      markerGroup.push(numberMarker);
+    }
+
+    if (point.type === "finish") {
+      const marker = L.marker([point.lat, point.lon], { icon: finishIcon })
+        .addTo(map)
+        .bindPopup("Maali");
+
+      courseMarkers.push(marker);
+      markerGroup.push(marker);
+    }
+
+    coursePointMarkerGroups.push(markerGroup);
+  });
+
+  controlNumber = maxControlNumber + 1;
+
+  updateCourseLine();
+  updateStartDirection();
+  
+}
+
+function resetCurrentView() {
+  timerRunning = false;
+  clearInterval(timerInterval);
+  clearInterval(simGpsInterval);
+
+  document.getElementById('timer').textContent = "00:00:00.00";
+  document.getElementById('eventStatus').textContent = "Ei käynnissä";
+  document.getElementById('splitList').innerHTML = "";
+
+  route.setLatLngs([]);
+  currentEvent = null;
+  coursePoints = [];
+  controlNumber = 1;
+
+  clearCourseMarkersOnly();
+
+  if (gpsMarker) {
+    map.removeLayer(gpsMarker);
+    gpsMarker = null;
+  }
+}
+
+function startGpsTracking() {
+  if (!navigator.geolocation) {
+    alert("GPS ei ole tuettu");
+    return;
+  }
+
+  watchId = navigator.geolocation.watchPosition(
+    (position) => {
+     
+	 const realLat = position.coords.latitude;
+	const realLon = position.coords.longitude;
+	const accuracy = position.coords.accuracy;
+
+console.log("GPS:", realLat, realLon, "tarkkuus:", accuracy, "m");
+
+document.getElementById('eventStatus').textContent =
+  "GPS toimii: " + realLat.toFixed(6) + ", " + realLon.toFixed(6) +
+  " tarkkuus " + Math.round(accuracy) + " m";
+
+gpsReady = true;
+	 
+    },
+    (error) => {
+      alert("GPS-virhe: " + error.message);
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 10000
+    }
+  );
+}
+
+function checkControlVisits(lat, lon) {
+  if (!timerRunning || !currentEvent) return;
+
+  const currentPos = L.latLng(lat, lon);
+
+  coursePoints.forEach((point) => {
+    if (point.visited) return;
+    if (point.type === "start") return;
+
+    const pointPos = L.latLng(point.lat, point.lon);
+    const distance = currentPos.distanceTo(pointPos);
+
+    if (distance <= CONTROL_HIT_RADIUS) {
+      point.visited = true;
+
+      const elapsedMs = Date.now() - startTime;
+      const timeText = formatTime(elapsedMs);
+
+      currentEvent.splits.push({
+        name: point.name,
+        time: timeText,
+        elapsedMs: elapsedMs
+      });
+
+      addSplit(point.name, timeText);
+
+      if (point.type === "finish") {
+        timerRunning = false;
+        clearInterval(timerInterval);
+        clearInterval(simGpsInterval);
+        finishEvent();
+      }
+    }
+  });
+}
+
+function startGpsSimulation() {
+  if (!timerRunning) {
+    alert("Paina ensin Aloita. GPS-simulaatio toimii vain ajanoton aikana.");
+    return;
+  }
+
+  if (coursePoints.length < 2) {
+    alert("Lisää ensin lähtö, rasteja ja maali.");
+    return;
+  }
+
+  clearInterval(simGpsInterval);
+  simulatedRoutePoints = buildSimulatedRoute(coursePoints, 25);
+  simIndex = 0;
+
+  map.fitBounds(imageBounds);
+
+  simGpsInterval = setInterval(() => {
+    if (!timerRunning) {
+      clearInterval(simGpsInterval);
+      return;
+    }
+
+    if (simIndex >= simulatedRoutePoints.length) {
+      clearInterval(simGpsInterval);
+      return;
+    }
+
+    const p = simulatedRoutePoints[simIndex];
+    lastPosition = [p.lat, p.lon];
+
+    addPoint(p.lat, p.lon);
+    updateGpsMarker(p.lat, p.lon);
+    checkControlVisits(p.lat, p.lon);
+
+    map.panTo([p.lat, p.lon]);
+
+    gpsReady = true;
+    simIndex++;
+  }, 500);
+}
+
+function buildSimulatedRoute(points, stepsPerLeg) {
+  const route = [];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+
+    for (let step = 0; step < stepsPerLeg; step++) {
+      const t = step / stepsPerLeg;
+
+      route.push({
+        lat: a.lat + (b.lat - a.lat) * t,
+        lon: a.lon + (b.lon - a.lon) * t
+      });
+    }
+  }
+
+  const last = points[points.length - 1];
+
+  route.push({
+    lat: last.lat,
+    lon: last.lon
+  });
+
+  return route;
+}
+
+function updateGpsMarker(lat, lon) {
+  if (!gpsMarker) {
+    gpsMarker = L.circleMarker([lat, lon], {
+      radius: 7,
+      color: 'blue',
+      fillColor: 'blue',
+      fillOpacity: 0.9,
+      weight: 2
+    }).addTo(map);
+  } else {
+    gpsMarker.setLatLng([lat, lon]);
+  }
+}
+
+async function exportPdf() {
+  let reportControl = null;
+
+  try {
+    const { jsPDF } = window.jspdf;
+
+    const oldWidth = map.getContainer().style.width;
+    const oldHeight = map.getContainer().style.height;
+
+    document.body.classList.add("pdf-export");
+
+    reportControl = createPdfReportBox();
+    reportControl.addTo(map);
+
+    map.invalidateSize(true);
+    map.fitBounds(imageBounds);
+
+    setPdfIconSizes(true);
+    updateCourseLine(50);
+
+    route.setStyle({ weight: 2 });
+    route.redraw();
+
+    courseLine.eachLayer(layer => {
+      if (layer.setStyle) layer.setStyle({ weight: 2 });
+      if (layer.redraw) layer.redraw();
+    });
+
+    map.invalidateSize(true);
+    map.fitBounds(imageBounds);
+    updateCourseLine(50);
+    route.redraw();
+
+    await new Promise(resolve => setTimeout(resolve, 700));
+
+    const canvas = await html2canvas(document.getElementById('map'), {
+      scale: 2,
+      useCORS: false,
+      allowTaint: true,
+      backgroundColor: "#ffffff"
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+
+    const pdf = new jsPDF('portrait', 'mm', 'a4');
+    pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+
+    const fileName = (currentEvent?.name || "suunnistus")
+      .replace(/[^\wåäöÅÄÖ-]/g, "_");
+
+    pdf.save(fileName + ".pdf");
+
+    if (reportControl) {
+      map.removeControl(reportControl);
+    }
+
+    setPdfIconSizes(false);
+    updateCourseLine(12);
+    route.setStyle({ weight: 4 });
+
+    document.body.classList.remove("pdf-export");
+
+    map.getContainer().style.width = oldWidth;
+    map.getContainer().style.height = oldHeight;
+    map.invalidateSize();
+    map.fitBounds(imageBounds);
+
+    updateStartDirection();
+    route.setStyle({ weight: 4 });
+    updateCourseLine();
+
+  } catch (err) {
+    console.error(err);
+    alert("PDF-vienti epäonnistui: " + err.message);
+
+    if (reportControl) {
+      map.removeControl(reportControl);
+    }
+
+    setPdfIconSizes(false);
+    updateCourseLine(12);
+    route.setStyle({ weight: 4 });
+    document.body.classList.remove("pdf-export");
+    map.invalidateSize();
+  }
+}
+
+function createPdfReportBox() {
+  const control = L.control({
+    position: "topleft"
+  });
+
+  control.onAdd = function () {
+    const div = L.DomUtil.create('div', 'pdf-report-box');
+
+    const name = currentEvent?.name || "Nimetön tapahtuma";
+    const total = currentEvent?.totalTime || document.getElementById('timer').textContent;
+
+    let html = `
+      <h3>${name}</h3>
+      <b>Kokonaisaika:</b> ${total}<br>
+      <b>Väliajat:</b>
+      <ul>
+    `;
+
+    if (currentEvent && currentEvent.splits.length > 0) {
+      currentEvent.splits.forEach(split => {
+        html += `<li>${split.name}: ${split.time}</li>`;
+      });
+    } else {
+      html += `<li>Ei väliaikoja</li>`;
+    }
+
+    html += `</ul>`;
+
+    div.innerHTML = html;
+    return div;
+  };
+
+  return control;
+}
+
+function setPdfIconSizes(isPdf) {
+  if (!isPdf) {
+    coursePoints.forEach((point, index) => {
+      const markerGroup = coursePointMarkerGroups[index];
+      if (!markerGroup || !markerGroup[0]) return;
+
+      if (point.type === "start") markerGroup[0].setIcon(createStartIcon());
+      if (point.type === "control") markerGroup[0].setIcon(controlIcon);
+      if (point.type === "finish") markerGroup[0].setIcon(finishIcon);
+    });
+
+    updateStartDirection();
+    return;
+  }
+
+  coursePoints.forEach((point, index) => {
+    const markerGroup = coursePointMarkerGroups[index];
+    if (!markerGroup || !markerGroup[0]) return;
+
+    if (point.type === "start") {
+      markerGroup[0].setIcon(createStartIcon(16));
+    }
+
+    if (point.type === "control") {
+      markerGroup[0].setIcon(createControlIcon(16));
+    }
+
+    if (point.type === "finish") {
+      markerGroup[0].setIcon(createFinishIcon(16));
+    }
+  });
+
+  updateStartDirection(16);
+}
+
+function loadCurrentCourse() {
+  const saved = localStorage.getItem("suunnistus_currentCourse");
+
+  if (!saved) return;
+
+  const courseData = JSON.parse(saved);
+
+  if (courseData.mapImageData) {
+    currentMapImageData = courseData.mapImageData;
+    loadMapImageFromData(currentMapImageData);
+  }
+
+  imageBounds = courseData.imageBounds || imageBounds;
+  controlNumber = courseData.controlNumber || 1;
+
+  if (courseData.coursePoints) {
+    drawCourseFromPoints(courseData.coursePoints);
+  }
+}
+
+loadEventLogFromStorage();
+loadCurrentCourse();
+
+
+
+  </script>
+</body>
+</html>
