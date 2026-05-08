@@ -197,14 +197,14 @@ body.pdf-export .pdf-report-box {
   }
 
   #splitList,
-  #eventLogList {
-    max-height: 90px;
-    overflow-y: auto;
-  }
-@media (max-width: 700px) {
-  .leaflet-control-zoom {
-    display: none;
-  }
+#eventLogList {
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.leaflet-control-zoom {
+  display: none;
+}
 }
 
 #toggleSidebarBtn {
@@ -240,6 +240,7 @@ body.sidebar-hidden #sidebar {
     <div class="panel-section">
       <b>Ajanotto</b>
       <button id="prepGpsBtn">Valmistele GPS</button>
+      <button id="followGpsBtn">Seuraa GPS: ON</button>
       <button id="simGpsBtn">Simuloi GPS</button>
       <button id="startBtn">Aloita</button>
       <button id="stopBtn">Pysäytä</button>
@@ -369,6 +370,7 @@ let watchId = null;
 let gpsMarker = null;
 let lastRealGps = null;
 let calibrationMode = null;
+let followGps = true;
 
 let calibration = {
   A: null,
@@ -378,6 +380,8 @@ let calibration = {
 let simGpsInterval = null;
 let simIndex = 0;
 let simulatedRoutePoints = [];
+const MIN_ROUTE_POINT_DISTANCE = 3; // metriä
+let lastSavedRealGps = null;
 
 document.getElementById('fitMapBtn').addEventListener('click', () => {
   map.fitBounds(imageBounds);
@@ -538,6 +542,12 @@ document.getElementById('calibBBtn').addEventListener('click', () => {
   calibrationMode = "B";
   document.getElementById('calibStatus').textContent =
     "Kalibroi B: klikkaa kartasta kohta, jossa olet nyt.";
+});
+document.getElementById('followGpsBtn').addEventListener('click', () => {
+  followGps = !followGps;
+
+  document.getElementById('followGpsBtn').textContent =
+    followGps ? "Seuraa GPS: ON" : "Seuraa GPS: OFF";
 });
 
 document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
@@ -861,6 +871,8 @@ function addSplit(name, timeText) {
 }
 
 function startEvent() {
+lastSavedRealGps = null;
+
   const typedEventName = document.getElementById('eventNameInput').value.trim();
 
   currentEvent = {
@@ -1011,6 +1023,7 @@ function saveCalibrationPoint(label, mapLatLng) {
     document.getElementById('calibStatus').textContent =
       "Kalibrointi valmis. GPS voidaan piirtää kartalle.";
   }
+      saveCalibrationToStorage();
 }
 function gpsToMeters(gps, refLat) {
   const metersPerDegLat = 110540;
@@ -1080,7 +1093,24 @@ function saveCurrentCourse() {
     JSON.stringify(courseData)
   );
 }
+function saveCalibrationToStorage() {
+  localStorage.setItem(
+    "suunnistus_calibration",
+    JSON.stringify(calibration)
+  );
+}  
+function loadCalibrationFromStorage() {
+  const saved = localStorage.getItem("suunnistus_calibration");
 
+  if (!saved) return;
+
+  calibration = JSON.parse(saved);
+
+  if (calibration.A && calibration.B) {
+    document.getElementById('calibStatus').textContent =
+      "Kalibrointi palautettu muistista.";
+  }
+}
 function loadEventLogFromStorage() {
   const saved = localStorage.getItem("suunnistus_eventLog");
 
@@ -1209,8 +1239,34 @@ function resetCurrentView() {
     gpsMarker = null;
   }
 }
+function distanceMeters(gps1, gps2) {
+  if (!gps1 || !gps2) return Infinity;
+
+  const R = 6371000;
+  const lat1 = gps1.lat * Math.PI / 180;
+  const lat2 = gps2.lat * Math.PI / 180;
+  const dLat = (gps2.lat - gps1.lat) * Math.PI / 180;
+  const dLon = (gps2.lon - gps1.lon) * Math.PI / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}  
 
 function startGpsTracking() {
+
+  const accuracy = position.coords.accuracy;
+if (accuracy > 20) {
+  document.getElementById('eventStatus').textContent =
+    "GPS liian epätarkka (" + Math.round(accuracy) + " m)";
+  return;
+}
+
   if (!navigator.geolocation) {
     alert("GPS ei ole tuettu");
     return;
@@ -1237,13 +1293,25 @@ if (mapPoint) {
   document.getElementById('eventStatus').textContent =
     "GPS kartalla | tarkkuus " + Math.round(accuracy) + " m";
 
-  if (timerRunning) {
+ if (timerRunning) {
+  const currentGps = {
+    lat: realLat,
+    lon: realLon
+  };
+
+  const movedMeters = distanceMeters(lastSavedRealGps, currentGps);
+
+  if (movedMeters >= MIN_ROUTE_POINT_DISTANCE) {
     addPoint(mapPoint.lat, mapPoint.lon);
+    lastSavedRealGps = currentGps;
   }
+}
 
   updateGpsMarker(mapPoint.lat, mapPoint.lon);
   checkControlVisits(mapPoint.lat, mapPoint.lon);
+  if (followGps) {
   map.panTo([mapPoint.lat, mapPoint.lon]);
+}
 } else {
   document.getElementById('eventStatus').textContent =
     "GPS toimii: " + realLat.toFixed(6) + ", " + realLon.toFixed(6) +
@@ -1290,6 +1358,13 @@ function checkControlVisits(lat, lon) {
 
       addSplit(point.name, timeText);
 
+      if (navigator.vibrate) {
+  navigator.vibrate([200, 100, 200]);
+}
+
+document.getElementById('eventStatus').textContent =
+  point.name + " leimattu - " + timeText;
+
       if (point.type === "finish") {
         timerRunning = false;
         clearInterval(timerInterval);
@@ -1335,7 +1410,9 @@ function startGpsSimulation() {
     updateGpsMarker(p.lat, p.lon);
     checkControlVisits(p.lat, p.lon);
 
+    if (followGps) {
     map.panTo([p.lat, p.lon]);
+}
 
     gpsReady = true;
     simIndex++;
@@ -1562,7 +1639,7 @@ function loadCurrentCourse() {
 
 loadEventLogFromStorage();
 loadCurrentCourse();
-
+loadCalibrationFromStorage();
 
 
   </script>
