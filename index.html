@@ -156,6 +156,57 @@ body.pdf-export .pdf-report-box {
   max-width: 180px;
   padding: 6px;
 }
+
+/* Puhelinnäkymä */
+@media (max-width: 700px) {
+  #map {
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #sidebar {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 42vh;
+    border-radius: 14px 14px 0 0;
+    padding: 8px;
+    overflow-y: auto;
+    font-size: 13px;
+  }
+
+  .panel-section {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  #sidebar button {
+    padding: 8px 10px;
+    margin: 3px;
+    font-size: 13px;
+  }
+
+  #timer {
+    font-size: 18px;
+  }
+
+  #eventNameInput {
+    font-size: 14px;
+  }
+
+  #splitList,
+  #eventLogList {
+    max-height: 90px;
+    overflow-y: auto;
+  }
+@media (max-width: 700px) {
+  .leaflet-control-zoom {
+    display: none;
+  }
+}
+
   </style>
 </head>
 
@@ -170,6 +221,12 @@ body.pdf-export .pdf-report-box {
       <button id="resetBtn">Nollaa</button>
       <span id="timer">00:00:00.00</span>
     </div>
+     <div class="panel-section">
+      <b>GPS-kalibrointi</b>
+      <button id="calibABtn">Kalibroi A</button>
+      <button id="calibBBtn">Kalibroi B</button>
+  <div id="calibStatus">Kalibrointia ei tehty</div>
+</div>
 
     <div class="panel-section">
       <b>Karttakuva</b>
@@ -189,6 +246,7 @@ body.pdf-export .pdf-report-box {
       <button id="addFinishBtn">Lisää maali</button>
       <button id="undoPointBtn">Poista viimeisin piste</button>
     </div>
+   
 
     <div class="panel-section">
       <b>Tapahtuma</b>
@@ -283,6 +341,13 @@ let gpsReady = false;
 let lastPosition = null;
 let watchId = null;
 let gpsMarker = null;
+let lastRealGps = null;
+let calibrationMode = null;
+
+let calibration = {
+  A: null,
+  B: null
+};
 
 let simGpsInterval = null;
 let simIndex = 0;
@@ -435,6 +500,18 @@ document.getElementById('eventNameInput').addEventListener('input', (e) => {
 
 document.getElementById('exportPdfBtn').addEventListener('click', () => {
   exportPdf();
+});
+
+document.getElementById('calibABtn').addEventListener('click', () => {
+  calibrationMode = "A";
+  document.getElementById('calibStatus').textContent =
+    "Kalibroi A: klikkaa kartasta kohta, jossa olet nyt.";
+});
+
+document.getElementById('calibBBtn').addEventListener('click', () => {
+  calibrationMode = "B";
+  document.getElementById('calibStatus').textContent =
+    "Kalibroi B: klikkaa kartasta kohta, jossa olet nyt.";
 });
 
 function formatTime(ms) {
@@ -623,6 +700,12 @@ function createStartIconTowards(startPoint, targetPoint, size = 34) {
 }
 
 map.on('click', (e) => {
+  if (calibrationMode) {
+    saveCalibrationPoint(calibrationMode, e.latlng);
+    calibrationMode = null;
+    return;
+  }
+
   if (!addMode) return;
 
   const lat = e.latlng.lat;
@@ -863,6 +946,79 @@ function showSavedEvent(index) {
   map.fitBounds(imageBounds);
 }
 
+function saveCalibrationPoint(label, mapLatLng) {
+  if (!lastRealGps) {
+    alert("GPS-paikkaa ei ole vielä saatu. Paina ensin Valmistele GPS ja odota koordinaatit.");
+    return;
+  }
+
+  calibration[label] = {
+    map: {
+      lat: mapLatLng.lat,
+      lon: mapLatLng.lng
+    },
+    gps: {
+      lat: lastRealGps.lat,
+      lon: lastRealGps.lon,
+      accuracy: lastRealGps.accuracy
+    }
+  };
+
+  document.getElementById('calibStatus').textContent =
+    "Kalibroitu " + label +
+    " | GPS tarkkuus " + Math.round(lastRealGps.accuracy) + " m";
+
+  if (calibration.A && calibration.B) {
+    document.getElementById('calibStatus').textContent =
+      "Kalibrointi valmis. GPS voidaan piirtää kartalle.";
+  }
+}
+function gpsToMeters(gps, refLat) {
+  const metersPerDegLat = 110540;
+  const metersPerDegLon = 111320 * Math.cos(refLat * Math.PI / 180);
+
+  return {
+    x: gps.lon * metersPerDegLon,
+    y: gps.lat * metersPerDegLat
+  };
+}
+
+function gpsToMapPoint(realLat, realLon) {
+  if (!calibration.A || !calibration.B) {
+    return null;
+  }
+
+  const refLat = calibration.A.gps.lat;
+
+  const gA = gpsToMeters(calibration.A.gps, refLat);
+  const gB = gpsToMeters(calibration.B.gps, refLat);
+  const gP = gpsToMeters({ lat: realLat, lon: realLon }, refLat);
+
+  const mA = calibration.A.map;
+  const mB = calibration.B.map;
+
+  const gx = gB.x - gA.x;
+  const gy = gB.y - gA.y;
+
+  const px = gP.x - gA.x;
+  const py = gP.y - gA.y;
+
+  const mx = mB.lon - mA.lon;
+  const my = mB.lat - mA.lat;
+
+  const gLen2 = gx * gx + gy * gy;
+
+  if (gLen2 === 0) return null;
+
+  const u = (px * gx + py * gy) / gLen2;
+  const v = (gx * py - gy * px) / gLen2;
+
+  return {
+    lat: mA.lat + u * my + v * mx,
+    lon: mA.lon + u * mx - v * my
+  };
+}
+
 function saveEventLogToStorage() {
   try {
     localStorage.setItem("suunnistus_eventLog", JSON.stringify(eventLog));
@@ -1024,15 +1180,36 @@ function startGpsTracking() {
   watchId = navigator.geolocation.watchPosition(
     (position) => {
      
-	 const realLat = position.coords.latitude;
-	const realLon = position.coords.longitude;
-	const accuracy = position.coords.accuracy;
+	const realLat = position.coords.latitude;
+const realLon = position.coords.longitude;
+const accuracy = position.coords.accuracy;
+
+lastRealGps = {
+  lat: realLat,
+  lon: realLon,
+  accuracy: accuracy
+};
 
 console.log("GPS:", realLat, realLon, "tarkkuus:", accuracy, "m");
 
-document.getElementById('eventStatus').textContent =
-  "GPS toimii: " + realLat.toFixed(6) + ", " + realLon.toFixed(6) +
-  " tarkkuus " + Math.round(accuracy) + " m";
+const mapPoint = gpsToMapPoint(realLat, realLon);
+
+if (mapPoint) {
+  document.getElementById('eventStatus').textContent =
+    "GPS kartalla | tarkkuus " + Math.round(accuracy) + " m";
+
+  if (timerRunning) {
+    addPoint(mapPoint.lat, mapPoint.lon);
+  }
+
+  updateGpsMarker(mapPoint.lat, mapPoint.lon);
+  checkControlVisits(mapPoint.lat, mapPoint.lon);
+  map.panTo([mapPoint.lat, mapPoint.lon]);
+} else {
+  document.getElementById('eventStatus').textContent =
+    "GPS toimii: " + realLat.toFixed(6) + ", " + realLon.toFixed(6) +
+    " tarkkuus " + Math.round(accuracy) + " m | Kalibrointi puuttuu";
+}
 
 gpsReady = true;
 	 
