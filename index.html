@@ -207,6 +207,31 @@ body.pdf-export .pdf-report-box {
   }
 }
 
+#toggleSidebarBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1500;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  font-weight: bold;
+}
+
+body.sidebar-hidden #sidebar {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  #toggleSidebarBtn {
+    top: 10px;
+    right: 10px;
+    font-size: 13px;
+  }
+}
+
   </style>
 </head>
 
@@ -265,6 +290,7 @@ body.pdf-export .pdf-report-box {
   </div>
 
   <div id="map"></div>
+  <button id="toggleSidebarBtn">Piilota valikko</button>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -512,6 +538,19 @@ document.getElementById('calibBBtn').addEventListener('click', () => {
   calibrationMode = "B";
   document.getElementById('calibStatus').textContent =
     "Kalibroi B: klikkaa kartasta kohta, jossa olet nyt.";
+});
+
+document.getElementById('toggleSidebarBtn').addEventListener('click', () => {
+  document.body.classList.toggle('sidebar-hidden');
+
+  const hidden = document.body.classList.contains('sidebar-hidden');
+
+  document.getElementById('toggleSidebarBtn').textContent =
+    hidden ? "Näytä valikko" : "Piilota valikko";
+
+  setTimeout(() => {
+    map.invalidateSize();
+  }, 100);
 });
 
 function formatTime(ms) {
