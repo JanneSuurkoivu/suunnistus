@@ -871,7 +871,11 @@ function addSplit(name, timeText) {
 }
 
 function startEvent() {
-lastSavedRealGps = null;
+  lastSavedRealGps = null;
+
+  coursePoints.forEach(point => {
+    point.visited = false;
+  });
 
   const typedEventName = document.getElementById('eventNameInput').value.trim();
 
@@ -1260,13 +1264,6 @@ function distanceMeters(gps1, gps2) {
 
 function startGpsTracking() {
 
-  const accuracy = position.coords.accuracy;
-if (accuracy > 20) {
-  document.getElementById('eventStatus').textContent =
-    "GPS liian epätarkka (" + Math.round(accuracy) + " m)";
-  return;
-}
-
   if (!navigator.geolocation) {
     alert("GPS ei ole tuettu");
     return;
@@ -1274,16 +1271,22 @@ if (accuracy > 20) {
 
   watchId = navigator.geolocation.watchPosition(
     (position) => {
-     
-	const realLat = position.coords.latitude;
-const realLon = position.coords.longitude;
-const accuracy = position.coords.accuracy;
 
-lastRealGps = {
-  lat: realLat,
-  lon: realLon,
-  accuracy: accuracy
-};
+      const realLat = position.coords.latitude;
+      const realLon = position.coords.longitude;
+      const accuracy = position.coords.accuracy;
+
+      if (accuracy > 20) {
+        document.getElementById('eventStatus').textContent =
+          "GPS liian epätarkka (" + Math.round(accuracy) + " m)";
+        return;
+      }
+
+      lastRealGps = {
+        lat: realLat,
+        lon: realLon,
+        accuracy: accuracy
+      };
 
 console.log("GPS:", realLat, realLon, "tarkkuus:", accuracy, "m");
 
@@ -1332,17 +1335,25 @@ gpsReady = true;
   );
 }
 
+function distanceMapUnits(aLat, aLon, bLat, bLon) {
+  const dx = bLon - aLon;
+  const dy = bLat - aLat;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 function checkControlVisits(lat, lon) {
   if (!timerRunning || !currentEvent) return;
-
-  const currentPos = L.latLng(lat, lon);
 
   coursePoints.forEach((point) => {
     if (point.visited) return;
     if (point.type === "start") return;
 
-    const pointPos = L.latLng(point.lat, point.lon);
-    const distance = currentPos.distanceTo(pointPos);
+    const distance = distanceMapUnits(
+      lat,
+      lon,
+      point.lat,
+      point.lon
+    );
 
     if (distance <= CONTROL_HIT_RADIUS) {
       point.visited = true;
@@ -1359,11 +1370,11 @@ function checkControlVisits(lat, lon) {
       addSplit(point.name, timeText);
 
       if (navigator.vibrate) {
-  navigator.vibrate([200, 100, 200]);
-}
+        navigator.vibrate([200, 100, 200]);
+      }
 
-document.getElementById('eventStatus').textContent =
-  point.name + " leimattu - " + timeText;
+      document.getElementById('eventStatus').textContent =
+        point.name + " leimattu - " + timeText;
 
       if (point.type === "finish") {
         timerRunning = false;
