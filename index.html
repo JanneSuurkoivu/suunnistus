@@ -300,6 +300,9 @@ body.sidebar-hidden #sidebar {
   <script>
 let eventName = "";
 
+let courseLength = 0;
+let routeLength = 0;
+
 const map = L.map('map', {
   crs: L.CRS.Simple,
   minZoom: -2,
@@ -362,6 +365,7 @@ let startTime = null;
 let timerInterval = null;
 let currentEvent = null;
 let eventLog = [];
+let lastSplitMs = 0;
 
 const CONTROL_HIT_RADIUS = 35;
 let gpsReady = false;
@@ -402,6 +406,37 @@ reader.onload = () => {
 
 reader.readAsDataURL(file);
 });
+
+function calculateCourseLength() {
+  let total = 0;
+
+  for (let i = 0; i < coursePoints.length - 1; i++) {
+    total += distanceMapUnits(
+      coursePoints[i].lat,
+      coursePoints[i].lon,
+      coursePoints[i + 1].lat,
+      coursePoints[i + 1].lon
+    );
+  }
+
+  return total;
+}
+
+function calculateRouteLength() {
+  const points = route.getLatLngs();
+  let total = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    total += distanceMapUnits(
+      points[i].lat,
+      points[i].lng,
+      points[i + 1].lat,
+      points[i + 1].lng
+    );
+  }
+
+  return total;
+}
 
 function resizeImageForStorage(imageData, maxSize, callback) {
   const img = new Image();
@@ -871,7 +906,9 @@ function addSplit(name, timeText) {
 }
 
 function startEvent() {
+  pendingControl = null;
   lastSavedRealGps = null;
+  lastSplitMs = 0;
 
   coursePoints.forEach(point => {
     point.visited = false;
@@ -913,6 +950,19 @@ function finishEvent() {
 
   document.getElementById('eventStatus').textContent =
     "Valmis - kokonaisaika " + totalTimeText;
+
+courseLength = calculateCourseLength();
+routeLength = calculateRouteLength();
+
+currentEvent.courseLength = courseLength;
+currentEvent.routeLength = routeLength;
+
+document.getElementById('eventStatus').textContent =
+  "Valmis - kokonaisaika " + totalTimeText +
+  " | rata " + Math.round(courseLength) +
+  " | reitti " + Math.round(routeLength);
+
+
 
   saveEventToLog();
 }
@@ -1344,46 +1394,75 @@ function distanceMapUnits(aLat, aLon, bLat, bLon) {
 function checkControlVisits(lat, lon) {
   if (!timerRunning || !currentEvent) return;
 
-  coursePoints.forEach((point) => {
-    if (point.visited) return;
-    if (point.type === "start") return;
+  const nextPoint = coursePoints.find(point =>
+    point.type !== "start" && !point.visited
+  );
 
-    const distance = distanceMapUnits(
-      lat,
-      lon,
-      point.lat,
-      point.lon
-    );
+  if (!nextPoint) return;
 
-    if (distance <= CONTROL_HIT_RADIUS) {
-      point.visited = true;
+  const distance = distanceMapUnits(
+    lat,
+    lon,
+    nextPoint.lat,
+    nextPoint.lon
+  );
 
-      const elapsedMs = Date.now() - startTime;
-      const timeText = formatTime(elapsedMs);
+  const ENTER_RADIUS = CONTROL_HIT_RADIUS;
+  const EXIT_MARGIN = 8;
 
-      currentEvent.splits.push({
-        name: point.name,
-        time: timeText,
-        elapsedMs: elapsedMs
-      });
-
-      addSplit(point.name, timeText);
-
-      if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]);
-      }
+  if (!pendingControl || pendingControl.name !== nextPoint.name) {
+    if (distance <= ENTER_RADIUS) {
+      pendingControl = {
+        name: nextPoint.name,
+        point: nextPoint,
+        bestDistance: distance,
+        bestElapsedMs: Date.now() - startTime
+      };
 
       document.getElementById('eventStatus').textContent =
-        point.name + " leimattu - " + timeText;
-
-      if (point.type === "finish") {
-        timerRunning = false;
-        clearInterval(timerInterval);
-        clearInterval(simGpsInterval);
-        finishEvent();
-      }
+        nextPoint.name + " alueella...";
     }
-  });
+
+    return;
+  }
+
+  if (distance < pendingControl.bestDistance) {
+    pendingControl.bestDistance = distance;
+    pendingControl.bestElapsedMs = Date.now() - startTime;
+    return;
+  }
+
+  if (distance > pendingControl.bestDistance + EXIT_MARGIN) {
+    const point = pendingControl.point;
+    point.visited = true;
+
+    const elapsedMs = pendingControl.bestElapsedMs;
+    const timeText = formatTime(elapsedMs);
+
+    currentEvent.splits.push({
+      name: point.name,
+      time: timeText,
+      elapsedMs: elapsedMs
+    });
+
+    addSplit(point.name, timeText);
+
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200]);
+    }
+
+    document.getElementById('eventStatus').textContent =
+      point.name + " leimattu lähimmästä kohdasta - " + timeText;
+
+    pendingControl = null;
+
+    if (point.type === "finish") {
+      timerRunning = false;
+      clearInterval(timerInterval);
+      clearInterval(simGpsInterval);
+      finishEvent();
+    }
+  }
 }
 
 function startGpsSimulation() {
