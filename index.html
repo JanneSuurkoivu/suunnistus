@@ -440,6 +440,28 @@ function calculateCourseLength() {
   return total;
 }
 
+function buildSplitAnalysis(event) {
+  if (!event || !event.splits || event.splits.length < 2) {
+    return "<b>Rastivälit:</b><br>Ei rastivälitietoja";
+  }
+
+  let html = "<b>Rastivälit:</b><br>";
+
+  for (let i = 1; i < event.splits.length; i++) {
+    const prev = event.splits[i - 1];
+    const curr = event.splits[i];
+
+    const legMs = curr.elapsedMs - prev.elapsedMs;
+
+    html +=
+      i + ". " +
+      prev.name + " → " + curr.name +
+      ": " + formatTime(legMs) + "<br>";
+  }
+
+  return html;
+}
+
 function renderAnalysis(event) {
   const box = document.getElementById("analysisBox");
 
@@ -461,12 +483,15 @@ function renderAnalysis(event) {
     : "-";
 
   box.innerHTML = `
-    <b>Kokonaisaika:</b> ${event.totalTime || "-"}<br>
-    <b>Matka:</b> ${distanceKm ? distanceKm.toFixed(2) + " km" : "-"}<br>
-    <b>Keskivauhti:</b> ${pace !== "-" ? pace + " min/km" : "-"}<br>
-    <b>Huonoin GPS:</b> ${gpsAcc}<br>
-    <b>Rasteja:</b> ${event.splits ? event.splits.length - 1 : 0}
-  `;
+  <b>Kokonaisaika:</b> ${event.totalTime || "-"}<br>
+  <b>Matka:</b> ${distanceKm ? distanceKm.toFixed(2) + " km" : "-"}<br>
+  <b>Keskivauhti:</b> ${pace !== "-" ? pace + " min/km" : "-"}<br>
+  <b>Huonoin GPS:</b> ${gpsAcc}<br>
+  <b>Rasteja:</b> ${event.splits ? event.splits.length - 1 : 0}<br><br>
+  ${buildSplitAnalysis(event)}
+<br><br>
+${getBestAndWorstLeg(event)}
+`;
 }
 
 function calculateRouteLength() {
@@ -1570,7 +1595,6 @@ function smoothRoute(points, strength = 0.15) {
   if (points.length < 3) return points;
 
   const result = [];
-
   result.push(points[0]);
 
   for (let i = 1; i < points.length - 1; i++) {
@@ -1583,14 +1607,13 @@ function smoothRoute(points, strength = 0.15) {
         curr.lat * (1 - strength) +
         ((prev.lat + next.lat) / 2) * strength,
 
-      lon:
-        curr.lon * (1 - strength) +
-        ((prev.lon + next.lon) / 2) * strength
+      lng:
+        curr.lng * (1 - strength) +
+        ((prev.lng + next.lng) / 2) * strength
     });
   }
 
   result.push(points[points.length - 1]);
-
   return result;
 }
 function distanceMapUnits(aLat, aLon, bLat, bLon) {
@@ -1941,6 +1964,12 @@ let html = `
   <b>Matka:</b> ${distanceKm}<br>
   <b>Keskivauhti:</b> ${pace}<br>
   <b>Huonoin GPS:</b> ${gpsAcc}<br>
+  ${buildSplitAnalysis(currentEvent)}
+  <br>
+  ${getBestAndWorstLeg(currentEvent)}
+  <br><br>
+<b>Väliajat:</b>
+  <br>
   <b>Väliajat:</b>
   <ul>
 `;
@@ -1960,6 +1989,46 @@ let html = `
   };
 
   return control;
+}
+
+function getBestAndWorstLeg(event) {
+  if (!event || !event.splits || event.splits.length < 2) {
+    return "";
+  }
+
+  let best = null;
+  let worst = null;
+
+  for (let i = 1; i < event.splits.length; i++) {
+    const prev = event.splits[i - 1];
+    const curr = event.splits[i];
+
+    const legMs = curr.elapsedMs - prev.elapsedMs;
+
+    const leg = {
+      from: prev.name,
+      to: curr.name,
+      timeMs: legMs
+    };
+
+    if (!best || legMs < best.timeMs) {
+      best = leg;
+    }
+
+    if (!worst || legMs > worst.timeMs) {
+      worst = leg;
+    }
+  }
+
+  return `
+    <b>Nopein väli:</b><br>
+    ${best.from} → ${best.to}
+    (${formatTime(best.timeMs)})<br><br>
+
+    <b>Hitain väli:</b><br>
+    ${worst.from} → ${worst.to}
+    (${formatTime(worst.timeMs)})
+  `;
 }
 
 function setPdfIconSizes(isPdf) {
