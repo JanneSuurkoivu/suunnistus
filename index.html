@@ -152,9 +152,10 @@ body.pdf-export .control-number {
 }
 
 body.pdf-export .pdf-report-box {
-  font-size: 11px;
-  max-width: 180px;
-  padding: 6px;
+  font-size: 10px;
+  max-width: 230px;
+  padding: 7px;
+  line-height: 1.25;
 }
 
 /* Puhelinnäkymä */
@@ -240,7 +241,9 @@ body.sidebar-hidden #sidebar {
   margin-bottom: 8px;
   line-height: 1.4;
 }
-
+#simGpsBtn {
+  display: none;
+}
 
   </style>
 </head>
@@ -393,7 +396,7 @@ let calibrationMode = null;
 let followGps = true;
 let lastAcceptedRawGps = null;
 let worstGpsAccuracy = 0;
-
+const SIM_MAP_UNIT_TO_METERS = 1;
 let calibration = {
   A: null,
   B: null
@@ -438,6 +441,19 @@ function calculateCourseLength() {
   }
 
   return total;
+}
+function updateStartButtonState() {
+  const startBtn = document.getElementById('startBtn');
+
+  const notReadyReason = isReadyToStart();
+
+  startBtn.disabled = !!notReadyReason;
+
+  if (notReadyReason) {
+    startBtn.title = notReadyReason;
+  } else {
+    startBtn.title = "Valmis lähtöön";
+  }
 }
 
 function buildSplitAnalysis(event) {
@@ -509,6 +525,21 @@ function calculateRouteLength() {
 
   return total;
 }
+function calculateSimulatedDistanceMeters() {
+  const points = route.getLatLngs();
+  let total = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    total += distanceMapUnits(
+      points[i].lat,
+      points[i].lng,
+      points[i + 1].lat,
+      points[i + 1].lng
+    );
+  }
+
+  return total * SIM_MAP_UNIT_TO_METERS;
+}
 
 async function requestWakeLock() {
   try {
@@ -569,6 +600,23 @@ function resizeImageForStorage(imageData, maxSize, callback) {
 }
 
 
+function updateStartButtonState() {
+  const reason = isReadyToStart();
+  const startBtn = document.getElementById('startBtn');
+
+  if (reason) {
+    startBtn.disabled = true;
+    startBtn.textContent = "Aloita";
+    document.getElementById('eventStatus').textContent =
+      "Aloitus estetty: " + reason;
+  } else {
+    startBtn.disabled = false;
+    startBtn.textContent = "Aloita";
+    document.getElementById('eventStatus').textContent =
+      "Valmis aloitukseen";
+  }
+}
+
 function loadMapImageFromData(imageData) {
   if (!imageData) return;
 
@@ -595,6 +643,7 @@ function loadMapImageFromData(imageData) {
   };
 
   img.src = imageData;
+  updateStartButtonState();
 }
 
 document.getElementById('clearEventLogBtn').addEventListener('click', () => {
@@ -638,9 +687,17 @@ document.getElementById('undoPointBtn').addEventListener('click', () => {
 document.getElementById('startBtn').addEventListener('click', () => {
   if (timerRunning) return;
 
+  const notReadyReason = isReadyToStart();
+
+  if (notReadyReason) {
+    alert("Ei voida aloittaa: " + notReadyReason);
+    return;
+  }
+
   timerRunning = true;
   startTime = Date.now();
   startEvent();
+  setCourseEditingEnabled(false);
   requestWakeLock();
 
   timerInterval = setInterval(() => {
@@ -654,6 +711,8 @@ document.getElementById('stopBtn').addEventListener('click', () => {
   clearInterval(timerInterval);
   clearInterval(simGpsInterval);
   finishEvent();
+  setCourseEditingEnabled(true);
+
   releaseWakeLock();
 });
 
@@ -661,7 +720,8 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetCurrentView();
 });
 
-document.getElementById('prepGpsBtn').addEventListener('click', () => {
+document.getElementById('prepGpsBtn').addEventListener('click', async () => {
+  await requestWakeLock();
   startGpsTracking();
 });
 
@@ -722,11 +782,13 @@ function formatTime(ms) {
          String(hundredths).padStart(2, '0');
 }
 
-function addPoint(lat, lon) {
- route.addLatLng([lat, lon]);
+function addPoint(lat, lon, smooth = true) {
+  route.addLatLng([lat, lon]);
 
-const smoothed = smoothRoute(route.getLatLngs());
-route.setLatLngs(smoothed);
+  if (smooth) {
+    const smoothed = smoothRoute(route.getLatLngs());
+    route.setLatLngs(smoothed);
+  }
 
   if (currentEvent) {
     currentEvent.routePoints.push({
@@ -987,7 +1049,26 @@ map.on('click', (e) => {
 	saveCurrentCourse();
 
 addMode = null;
+updateStartButtonState();
 });
+
+function isReadyToStart() {
+  const hasMap = !!currentMapImageData;
+  const hasStart = coursePoints.some(p => p.type === "start");
+  const hasControl = coursePoints.some(p => p.type === "control");
+  const hasFinish = coursePoints.some(p => p.type === "finish");
+  const hasGps = !!lastRealGps;
+  const hasCalibration = !!calibration.A && !!calibration.B;
+
+  if (!hasMap) return "Karttakuva puuttuu";
+  if (!hasStart) return "Lähtö puuttuu";
+  if (!hasControl) return "Rasti puuttuu";
+  if (!hasFinish) return "Maali puuttuu";
+  if (!hasGps) return "GPS-paikkaa ei ole vielä saatu";
+  if (!hasCalibration) return "GPS-kalibrointi A ja B puuttuu";
+
+  return null;
+}
 
 function undoLastCoursePoint() {
   if (coursePoints.length === 0) return;
@@ -1010,6 +1091,8 @@ function undoLastCoursePoint() {
 	updateCourseLine();
 	updateStartDirection();
 	saveCurrentCourse();
+  updateStartButtonState();
+  addMode = null;
 }
 
 function addSplit(name, timeText) {
@@ -1062,7 +1145,11 @@ function finishEvent() {
   const totalMs = Date.now() - startTime;
   const totalTimeText = formatTime(totalMs);
 
-  const rawDistanceMeters = calculateRawGpsDistance();
+  let rawDistanceMeters = calculateRawGpsDistance();
+
+if (rawDistanceMeters === 0) {
+  rawDistanceMeters = calculateSimulatedDistanceMeters();
+}
   const rawDistanceKm = rawDistanceMeters / 1000;
   const paceMinPerKm = rawDistanceKm > 0
     ? (totalMs / 60000) / rawDistanceKm
@@ -1084,6 +1171,7 @@ function finishEvent() {
     " | vauhti " + paceMinPerKm.toFixed(1) + " min/km";
 
   renderAnalysis(currentEvent);
+  setCourseEditingEnabled(true);
   saveEventToLog();
 }
 function calculateRawGpsDistance() {
@@ -1263,6 +1351,8 @@ function saveCalibrationPoint(label, mapLatLng) {
       "Kalibrointi valmis. GPS voidaan piirtää kartalle.";
   }
       saveCalibrationToStorage();
+      updateStartButtonState();
+      
 }
 function gpsToMeters(gps, refLat) {
   const metersPerDegLat = 110540;
@@ -1459,6 +1549,8 @@ function drawCourseFromPoints(points) {
 
 function resetCurrentView() {
   releaseWakeLock();
+  stopGpsTracking();
+
   timerRunning = false;
   clearInterval(timerInterval);
   clearInterval(simGpsInterval);
@@ -1479,6 +1571,8 @@ function resetCurrentView() {
     map.removeLayer(gpsMarker);
     gpsMarker = null;
   }
+
+  setCourseEditingEnabled(true);
 }
 function distanceMeters(gps1, gps2) {
   if (!gps1 || !gps2) return Infinity;
@@ -1502,6 +1596,12 @@ function distanceMeters(gps1, gps2) {
 function startGpsTracking() {
   if (!navigator.geolocation) {
     alert("GPS ei ole tuettu");
+    return;
+  }
+
+   if (watchId !== null) {
+    document.getElementById('eventStatus').textContent =
+      "GPS-seuranta on jo käynnissä.";
     return;
   }
 
@@ -1590,6 +1690,16 @@ function startGpsTracking() {
       timeout: 10000
     }
   );
+  updateStartButtonState();
+}
+
+function stopGpsTracking() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+
+  gpsReady = false;
 }
 function smoothRoute(points, strength = 0.15) {
   if (points.length < 3) return points;
@@ -1760,6 +1870,9 @@ function commitPendingControl() {
   }
 }
 
+
+ 
+
 function startGpsSimulation() {
   if (!timerRunning) {
     alert("Paina ensin Aloita. GPS-simulaatio toimii vain ajanoton aikana.");
@@ -1772,6 +1885,7 @@ function startGpsSimulation() {
   }
 
   clearInterval(simGpsInterval);
+
   simulatedRoutePoints = buildSimulatedRoute(coursePoints, 25);
   simIndex = 0;
 
@@ -1784,26 +1898,34 @@ function startGpsSimulation() {
     }
 
     if (simIndex >= simulatedRoutePoints.length) {
-  commitPendingControl();
-  clearInterval(simGpsInterval);
-  return;
-}
+      commitPendingControl();
+      clearInterval(simGpsInterval);
+      return;
+    }
 
     const p = simulatedRoutePoints[simIndex];
-    lastPosition = [p.lat, p.lon];
 
-    addPoint(p.lat, p.lon);
+    addPoint(p.lat, p.lon, false);
     updateGpsMarker(p.lat, p.lon);
     checkControlVisits(p.lat, p.lon);
 
     if (followGps) {
-    map.panTo([p.lat, p.lon]);
-}
+      map.panTo([p.lat, p.lon]);
+    }
 
     gpsReady = true;
     simIndex++;
   }, 500);
 }
+
+function setCourseEditingEnabled(enabled) {
+  document.getElementById('addStartBtn').disabled = !enabled;
+  document.getElementById('addControlBtn').disabled = !enabled;
+  document.getElementById('addFinishBtn').disabled = !enabled;
+  document.getElementById('undoPointBtn').disabled = !enabled;
+  document.getElementById('mapImageInput').disabled = !enabled;
+}
+
 
 function buildSimulatedRoute(points, stepsPerLeg) {
   const route = [];
@@ -1820,14 +1942,12 @@ function buildSimulatedRoute(points, stepsPerLeg) {
         lon: a.lon + (b.lon - a.lon) * t
       });
     }
+
+    route.push({
+      lat: b.lat,
+      lon: b.lon
+    });
   }
-
-  const last = points[points.length - 1];
-
-  route.push({
-    lat: last.lat,
-    lon: last.lon
-  });
 
   return route;
 }
@@ -1947,32 +2067,25 @@ function createPdfReportBox() {
     const total = currentEvent?.totalTime || document.getElementById('timer').textContent;
 
     const distanceKm = currentEvent?.rawDistanceMeters
-  ? (currentEvent.rawDistanceMeters / 1000).toFixed(2) + " km"
-  : "-";
+      ? (currentEvent.rawDistanceMeters / 1000).toFixed(2) + " km"
+      : "-";
 
-const pace = currentEvent?.paceMinPerKm
-  ? currentEvent.paceMinPerKm.toFixed(1) + " min/km"
-  : "-";
+    const pace = currentEvent?.paceMinPerKm
+      ? currentEvent.paceMinPerKm.toFixed(1) + " min/km"
+      : "-";
 
-const gpsAcc = currentEvent?.worstGpsAccuracy
-  ? Math.round(currentEvent.worstGpsAccuracy) + " m"
-  : "-";
+    let html = `
+      <h3>${name}</h3>
+      <b>Kokonaisaika:</b> ${total}<br>
+      <b>Matka:</b> ${distanceKm}<br>
+      <b>Keskivauhti:</b> ${pace}<br><br>
 
-let html = `
-  <h3>${name}</h3>
-  <b>Kokonaisaika:</b> ${total}<br>
-  <b>Matka:</b> ${distanceKm}<br>
-  <b>Keskivauhti:</b> ${pace}<br>
-  <b>Huonoin GPS:</b> ${gpsAcc}<br>
-  ${buildSplitAnalysis(currentEvent)}
-  <br>
-  ${getBestAndWorstLeg(currentEvent)}
-  <br><br>
-<b>Väliajat:</b>
-  <br>
-  <b>Väliajat:</b>
-  <ul>
-`;
+      ${getBestAndWorstLeg(currentEvent)}
+
+      <br><br>
+      <b>Väliajat:</b>
+      <ul>
+    `;
 
     if (currentEvent && currentEvent.splits.length > 0) {
       currentEvent.splits.forEach(split => {
@@ -2089,6 +2202,7 @@ function loadCurrentCourse() {
 loadEventLogFromStorage();
 loadCurrentCourse();
 loadCalibrationFromStorage();
+updateStartButtonState();
 
 
   </script>
