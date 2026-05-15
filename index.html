@@ -254,7 +254,6 @@ body.sidebar-hidden #sidebar {
       <b>Ajanotto</b>
       <button id="prepGpsBtn">Valmistele GPS</button>
       <button id="followGpsBtn">Seuraa GPS: ON</button>
-      <button id="simGpsBtn">Simuloi GPS</button>
       <button id="startBtn">Aloita</button>
       <button id="stopBtn">Pysäytä</button>
       <button id="resetBtn">Nollaa</button>
@@ -271,6 +270,7 @@ body.sidebar-hidden #sidebar {
       <b>Karttakuva</b>
       <input type="file" id="mapImageInput" accept="image/*">
       <button id="fitMapBtn">Sovita kartta</button>
+      <button id="clearCourseBtn">Tyhjennä kartta ja rata</button>
 
       <div id="eventNameBox" style="display:none; margin-top:8px;">
         <b>Tapahtuman nimi</b>
@@ -321,23 +321,25 @@ let eventName = "";
 let courseLength = 0;
 let routeLength = 0;
 
-const map = L.map('map', {
-  crs: L.CRS.Simple,
-  minZoom: -2,
-  maxZoom: 4,
+let map = L.map('map', {
+  minZoom: 2,
+  maxZoom: 19,
   preferCanvas: true
 });
+
+let osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+map.setView([63.096, 21.615], 14);
 
 const lineRenderer = L.canvas({
   padding: 0.5
 });
 
-let imageBounds = [[0, 0], [1000, 1000]];
-map.fitBounds(imageBounds);
-
-setTimeout(() => {
-  map.zoomIn(1);
-}, 100);
+let imageBounds = null;
+let mapMode = "osm";
 
 let imageOverlay = null;
 let currentMapImageData = null;
@@ -378,6 +380,12 @@ let courseMarkers = [];
 let coursePointMarkerGroups = [];
 let courseLine = L.layerGroup().addTo(map);
 
+
+const CONTROL_HIT_RADIUS = 35;
+const MIN_ROUTE_POINT_DISTANCE = 3; // metriä
+const GPS_READY_ACCURACY = 10;
+
+
 let timerRunning = false;
 let startTime = null;
 let timerInterval = null;
@@ -386,7 +394,6 @@ let eventLog = [];
 let lastSplitMs = 0;
 let wakeLock = null;
 let pendingControl = null;
-const CONTROL_HIT_RADIUS = 35;
 let gpsReady = false;
 let lastPosition = null;
 let watchId = null;
@@ -396,17 +403,15 @@ let calibrationMode = null;
 let followGps = true;
 let lastAcceptedRawGps = null;
 let worstGpsAccuracy = 0;
-const SIM_MAP_UNIT_TO_METERS = 1;
 let calibration = {
   A: null,
   B: null
 };
 
-let simGpsInterval = null;
-let simIndex = 0;
-let simulatedRoutePoints = [];
-const MIN_ROUTE_POINT_DISTANCE = 3; // metriä
+
+
 let lastSavedRealGps = null;
+
 
 document.getElementById('fitMapBtn').addEventListener('click', () => {
   map.fitBounds(imageBounds);
@@ -525,21 +530,7 @@ function calculateRouteLength() {
 
   return total;
 }
-function calculateSimulatedDistanceMeters() {
-  const points = route.getLatLngs();
-  let total = 0;
 
-  for (let i = 0; i < points.length - 1; i++) {
-    total += distanceMapUnits(
-      points[i].lat,
-      points[i].lng,
-      points[i + 1].lat,
-      points[i + 1].lng
-    );
-  }
-
-  return total * SIM_MAP_UNIT_TO_METERS;
-}
 
 async function requestWakeLock() {
   try {
@@ -617,8 +608,47 @@ function updateStartButtonState() {
   }
 }
 
+function resetCalibration(message = "Kalibrointi tyhjennetty.") {
+  calibration = {
+    A: null,
+    B: null
+  };
+
+  localStorage.removeItem("suunnistus_calibration");
+
+  document.getElementById('calibStatus').textContent = message;
+}
+
+function recreateMapForImageMode() {
+  map.remove();
+
+  map = L.map('map', {
+    crs: L.CRS.Simple,
+    minZoom: -4,
+    maxZoom: 4,
+    preferCanvas: true
+  });
+
+  route = L.polyline([], {
+    color: 'red',
+    weight: 4,
+    renderer: L.canvas({ padding: 0.5 })
+  }).addTo(map);
+
+  courseLine = L.layerGroup().addTo(map);
+
+  imageOverlay = null;
+}
+
+
 function loadMapImageFromData(imageData) {
   if (!imageData) return;
+
+  mapMode = "image";
+
+  recreateMapForImageMode();
+
+  resetCalibration("Uusi kartta ladattu. Tee GPS-kalibrointi A ja B uudelleen.");
 
   const img = new Image();
 
@@ -628,11 +658,8 @@ function loadMapImageFromData(imageData) {
 
     imageBounds = [[0, 0], [h, w]];
 
-    if (imageOverlay) {
-      map.removeLayer(imageOverlay);
-    }
-
     imageOverlay = L.imageOverlay(imageData, imageBounds).addTo(map);
+
     map.fitBounds(imageBounds);
 
     document.getElementById('eventNameBox').style.display = "block";
@@ -640,14 +667,71 @@ function loadMapImageFromData(imageData) {
 
     document.getElementById('eventStatus').textContent =
       "Karttakuva ladattu. Lisää lähtö, rastit ja maali.";
+
+    updateStartButtonState();
   };
 
   img.src = imageData;
-  updateStartButtonState();
 }
 
 document.getElementById('clearEventLogBtn').addEventListener('click', () => {
   clearSavedEvents();
+});
+
+document.getElementById('clearCourseBtn').addEventListener('click', () => {
+  localStorage.removeItem("suunnistus_currentCourse");
+  localStorage.removeItem("suunnistus_calibration");
+
+  map.remove();
+
+  map = L.map('map', {
+    minZoom: 2,
+    maxZoom: 19,
+    preferCanvas: true
+  });
+
+  osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  map.setView([63.096, 21.615], 14);
+
+  mapMode = "osm";
+  imageOverlay = null;
+  imageBounds = null;
+  currentMapImageData = null;
+
+  route = L.polyline([], {
+    color: 'red',
+    weight: 4,
+    renderer: L.canvas({ padding: 0.5 })
+  }).addTo(map);
+
+  courseLine = L.layerGroup().addTo(map);
+
+  coursePoints = [];
+  courseMarkers = [];
+  coursePointMarkerGroups = [];
+  controlNumber = 1;
+  addMode = null;
+
+  resetCalibration("Kartta ja kalibrointi tyhjennetty.");
+
+  document.getElementById('mapImageInput').value = "";
+  document.getElementById('eventNameBox').style.display = "none";
+  document.getElementById('splitList').innerHTML = "";
+  document.getElementById('timer').textContent = "00:00:00.00";
+  document.getElementById('eventStatus').textContent =
+    "Kartta tyhjennetty. Käytössä normaali OSM-kartta.";
+
+  if (gpsMarker) {
+    gpsMarker = null;
+  }
+
+  currentEvent = null;
+  renderAnalysis(null);
+  updateStartButtonState();
 });
 
 document.getElementById('addStartBtn').addEventListener('click', () => {
@@ -694,6 +778,8 @@ document.getElementById('startBtn').addEventListener('click', () => {
     return;
   }
 
+ 
+
   timerRunning = true;
   startTime = Date.now();
   startEvent();
@@ -709,7 +795,6 @@ document.getElementById('startBtn').addEventListener('click', () => {
 document.getElementById('stopBtn').addEventListener('click', () => {
   timerRunning = false;
   clearInterval(timerInterval);
-  clearInterval(simGpsInterval);
   finishEvent();
   setCourseEditingEnabled(true);
 
@@ -725,9 +810,7 @@ document.getElementById('prepGpsBtn').addEventListener('click', async () => {
   startGpsTracking();
 });
 
-document.getElementById('simGpsBtn').addEventListener('click', () => {
-  startGpsSimulation();
-});
+
 
 document.getElementById('eventNameInput').addEventListener('input', (e) => {
   eventName = e.target.value;
@@ -1053,11 +1136,11 @@ updateStartButtonState();
 });
 
 function isReadyToStart() {
-  const hasMap = !!currentMapImageData;
+  const hasMap = mapMode === "osm" || !!currentMapImageData;
   const hasStart = coursePoints.some(p => p.type === "start");
   const hasControl = coursePoints.some(p => p.type === "control");
   const hasFinish = coursePoints.some(p => p.type === "finish");
-  const hasGps = !!lastRealGps;
+  const hasGps = gpsReady;
   const hasCalibration = !!calibration.A && !!calibration.B;
 
   if (!hasMap) return "Karttakuva puuttuu";
@@ -1147,9 +1230,7 @@ function finishEvent() {
 
   let rawDistanceMeters = calculateRawGpsDistance();
 
-if (rawDistanceMeters === 0) {
-  rawDistanceMeters = calculateSimulatedDistanceMeters();
-}
+
   const rawDistanceKm = rawDistanceMeters / 1000;
   const paceMinPerKm = rawDistanceKm > 0
     ? (totalMs / 60000) / rawDistanceKm
@@ -1285,7 +1366,6 @@ function showSavedEvent(index) {
 
   timerRunning = false;
   clearInterval(timerInterval);
-  clearInterval(simGpsInterval);
 
   currentEvent = event;
 
@@ -1553,7 +1633,6 @@ function resetCurrentView() {
 
   timerRunning = false;
   clearInterval(timerInterval);
-  clearInterval(simGpsInterval);
 
   document.getElementById('timer').textContent = "00:00:00.00";
   document.getElementById('eventStatus').textContent = "Ei käynnissä";
@@ -1599,7 +1678,7 @@ function startGpsTracking() {
     return;
   }
 
-   if (watchId !== null) {
+  if (watchId !== null) {
     document.getElementById('eventStatus').textContent =
       "GPS-seuranta on jo käynnissä.";
     return;
@@ -1610,6 +1689,11 @@ function startGpsTracking() {
       const realLat = position.coords.latitude;
       const realLon = position.coords.longitude;
       const accuracy = position.coords.accuracy;
+
+      if (accuracy <= GPS_READY_ACCURACY) {
+        gpsReady = true;
+        updateStartButtonState();
+      }
 
       if (accuracy > 20) {
         document.getElementById('eventStatus').textContent =
@@ -1645,20 +1729,16 @@ function startGpsTracking() {
         }
       }
 
-      console.log("GPS:", realLat, realLon, "tarkkuus:", accuracy, "m");
-
       const mapPoint = gpsToMapPoint(realLat, realLon);
 
       if (mapPoint) {
         document.getElementById('eventStatus').textContent =
           "GPS kartalla | tarkkuus " + Math.round(accuracy) + " m";
 
-        if (timerRunning) {
-          const currentGps = {
-            lat: realLat,
-            lon: realLon
-          };
+        updateGpsMarker(mapPoint.lat, mapPoint.lon);
 
+        if (timerRunning) {
+          const currentGps = { lat: realLat, lon: realLon };
           const movedMeters = distanceMeters(lastSavedRealGps, currentGps);
 
           if (movedMeters >= MIN_ROUTE_POINT_DISTANCE) {
@@ -1667,22 +1747,45 @@ function startGpsTracking() {
           }
         }
 
-        updateGpsMarker(mapPoint.lat, mapPoint.lon);
         checkControlVisits(mapPoint.lat, mapPoint.lon);
 
         if (followGps) {
           map.panTo([mapPoint.lat, mapPoint.lon]);
         }
+
       } else {
         document.getElementById('eventStatus').textContent =
-          "GPS toimii: " + realLat.toFixed(6) + ", " + realLon.toFixed(6) +
-          " tarkkuus " + Math.round(accuracy) + " m | Kalibrointi puuttuu";
+          "GPS toimii normaalikartalla: " +
+          realLat.toFixed(6) + ", " +
+          realLon.toFixed(6) +
+          " tarkkuus " + Math.round(accuracy) + " m";
+
+        updateGpsMarker(realLat, realLon);
+
+        if (timerRunning) {
+          const currentGps = { lat: realLat, lon: realLon };
+          const movedMeters = distanceMeters(lastSavedRealGps, currentGps);
+
+          if (movedMeters >= MIN_ROUTE_POINT_DISTANCE) {
+            addPoint(realLat, realLon, false);
+            lastSavedRealGps = currentGps;
+          }
+        }
+
+        checkControlVisits(realLat, realLon);
+
+        if (followGps) {
+          map.panTo([realLat, realLon]);
+        }
       }
 
       gpsReady = true;
+      updateStartButtonState();
     },
     (error) => {
       alert("GPS-virhe: " + error.message);
+      watchId = null;
+      updateStartButtonState();
     },
     {
       enableHighAccuracy: true,
@@ -1690,7 +1793,9 @@ function startGpsTracking() {
       timeout: 10000
     }
   );
-  updateStartButtonState();
+
+  document.getElementById('eventStatus').textContent =
+    "GPS-seurantaa käynnistetään...";
 }
 
 function stopGpsTracking() {
@@ -1774,7 +1879,6 @@ if (
   timerRunning = false;
 
   clearInterval(timerInterval);
-  clearInterval(simGpsInterval);
 
   pendingControl = null;
 
@@ -1835,88 +1939,16 @@ if (
     if (point.type === "finish") {
       timerRunning = false;
       clearInterval(timerInterval);
-      clearInterval(simGpsInterval);
       finishEvent();
     }
   }
 }
-function commitPendingControl() {
-  if (!pendingControl) return;
 
-  const point = pendingControl.point;
-  point.visited = true;
-
-  const elapsedMs = pendingControl.bestElapsedMs;
-  const timeText = formatTime(elapsedMs);
-
-  currentEvent.splits.push({
-    name: point.name,
-    time: timeText,
-    elapsedMs: elapsedMs
-  });
-
-  addSplit(point.name, timeText);
-
-  document.getElementById('eventStatus').textContent =
-    point.name + " leimattu - " + timeText;
-
-  pendingControl = null;
-
-  if (point.type === "finish") {
-    timerRunning = false;
-    clearInterval(timerInterval);
-    clearInterval(simGpsInterval);
-    finishEvent();
-  }
-}
 
 
  
 
-function startGpsSimulation() {
-  if (!timerRunning) {
-    alert("Paina ensin Aloita. GPS-simulaatio toimii vain ajanoton aikana.");
-    return;
-  }
 
-  if (coursePoints.length < 2) {
-    alert("Lisää ensin lähtö, rasteja ja maali.");
-    return;
-  }
-
-  clearInterval(simGpsInterval);
-
-  simulatedRoutePoints = buildSimulatedRoute(coursePoints, 25);
-  simIndex = 0;
-
-  map.fitBounds(imageBounds);
-
-  simGpsInterval = setInterval(() => {
-    if (!timerRunning) {
-      clearInterval(simGpsInterval);
-      return;
-    }
-
-    if (simIndex >= simulatedRoutePoints.length) {
-      commitPendingControl();
-      clearInterval(simGpsInterval);
-      return;
-    }
-
-    const p = simulatedRoutePoints[simIndex];
-
-    addPoint(p.lat, p.lon, false);
-    updateGpsMarker(p.lat, p.lon);
-    checkControlVisits(p.lat, p.lon);
-
-    if (followGps) {
-      map.panTo([p.lat, p.lon]);
-    }
-
-    gpsReady = true;
-    simIndex++;
-  }, 500);
-}
 
 function setCourseEditingEnabled(enabled) {
   document.getElementById('addStartBtn').disabled = !enabled;
@@ -1927,30 +1959,7 @@ function setCourseEditingEnabled(enabled) {
 }
 
 
-function buildSimulatedRoute(points, stepsPerLeg) {
-  const route = [];
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-
-    for (let step = 0; step < stepsPerLeg; step++) {
-      const t = step / stepsPerLeg;
-
-      route.push({
-        lat: a.lat + (b.lat - a.lat) * t,
-        lon: a.lon + (b.lon - a.lon) * t
-      });
-    }
-
-    route.push({
-      lat: b.lat,
-      lon: b.lon
-    });
-  }
-
-  return route;
-}
 
 function updateGpsMarker(lat, lon) {
   if (!gpsMarker) {
