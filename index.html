@@ -1892,6 +1892,25 @@ function distanceMapUnits(aLat, aLon, bLat, bLon) {
   const dy = bLat - aLat;
   return Math.sqrt(dx * dx + dy * dy);
 }
+function distanceForCurrentMap(aLat, aLon, bLat, bLon) {
+
+  if (mapMode === "osm") {
+
+    return distanceMeters(
+      { lat: aLat, lon: aLon },
+      { lat: bLat, lon: bLon }
+    );
+
+  } else {
+
+    return distanceMapUnits(
+      aLat,
+      aLon,
+      bLat,
+      bLon
+    );
+  }
+}
 
 function checkControlVisits(lat, lon) {
   if (!timerRunning || !currentEvent) return;
@@ -1902,12 +1921,12 @@ function checkControlVisits(lat, lon) {
 
   if (!nextPoint) return;
 
-  const distance = distanceMapUnits(
-    lat,
-    lon,
-    nextPoint.lat,
-    nextPoint.lon
-  );
+ const distance = distanceForCurrentMap(
+  lat,
+  lon,
+  nextPoint.lat,
+  nextPoint.lon
+);
 
   const FINISH_IMMEDIATE_RADIUS = 8;
 
