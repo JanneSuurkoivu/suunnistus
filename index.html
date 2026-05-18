@@ -333,6 +333,7 @@ let osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
 }).addTo(map);
 
 map.setView([63.096, 21.615], 14);
+attachMapClickHandler();
 
 const lineRenderer = L.canvas({
   padding: 0.5
@@ -638,6 +639,7 @@ function recreateMapForImageMode() {
   courseLine = L.layerGroup().addTo(map);
 
   imageOverlay = null;
+  attachMapClickHandler();
 }
 
 
@@ -696,6 +698,7 @@ document.getElementById('clearCourseBtn').addEventListener('click', () => {
   }).addTo(map);
 
   map.setView([63.096, 21.615], 14);
+  attachMapClickHandler();
 
   mapMode = "osm";
   imageOverlay = null;
@@ -732,6 +735,7 @@ document.getElementById('clearCourseBtn').addEventListener('click', () => {
   currentEvent = null;
   renderAnalysis(null);
   updateStartButtonState();
+  
 });
 
 document.getElementById('addStartBtn').addEventListener('click', () => {
@@ -865,6 +869,7 @@ function formatTime(ms) {
          String(hundredths).padStart(2, '0');
 }
 
+
 function addPoint(lat, lon, smooth = true) {
   route.addLatLng([lat, lon]);
 
@@ -880,6 +885,136 @@ function addPoint(lat, lon, smooth = true) {
       time: Date.now() - startTime
     });
   }
+}
+
+function attachMapClickHandler() {
+  map.on('click', (e) => {
+
+    if (calibrationMode) {
+      saveCalibrationPoint(calibrationMode, e.latlng);
+      calibrationMode = null;
+      return;
+    }
+
+    if (!addMode) return;
+
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+
+    const markerGroup = [];
+
+    if (addMode === "start") {
+
+  const point = {
+    type: "start",
+    name: "Lähtö",
+    lat,
+    lon,
+    visited: false
+  };
+
+  const marker = L.marker([lat, lon], {
+    icon: createStartIcon()
+  }).addTo(map).bindPopup("Lähtö");
+
+  marker.on('click', () => {
+    useCoursePointForCalibration(point);
+  });
+
+  courseMarkers.push(marker);
+  markerGroup.push(marker);
+
+  coursePoints.push(point);
+}
+
+    if (addMode === "control") {
+  const name = "Rasti " + controlNumber;
+
+  const point = {
+    type: "control",
+    name,
+    lat,
+    lon,
+    visited: false
+  };
+
+  const marker = L.marker([lat, lon], {
+    icon: controlIcon
+  }).addTo(map).bindPopup(name);
+
+  marker.on('click', () => {
+    useCoursePointForCalibration(point);
+  });
+
+  courseMarkers.push(marker);
+  markerGroup.push(marker);
+
+  const numberIcon = L.divIcon({
+    className: 'control-number',
+    html: controlNumber,
+    iconSize: [34, 34],
+    iconAnchor: [-30, 16]
+  });
+
+  const numberMarker = L.marker([lat, lon], {
+    icon: numberIcon,
+    interactive: false
+  }).addTo(map);
+
+  courseMarkers.push(numberMarker);
+  markerGroup.push(numberMarker);
+
+  coursePoints.push(point);
+
+  controlNumber++;
+}
+
+    if (addMode === "finish") {
+
+  const point = {
+    type: "finish",
+    name: "Maali",
+    lat,
+    lon,
+    visited: false
+  };
+
+  const marker = L.marker([lat, lon], {
+    icon: finishIcon
+  }).addTo(map).bindPopup("Maali");
+
+  marker.on('click', () => {
+    useCoursePointForCalibration(point);
+  });
+
+  courseMarkers.push(marker);
+  markerGroup.push(marker);
+
+  coursePoints.push(point);
+}
+
+    coursePointMarkerGroups.push(markerGroup);
+
+    updateCourseLine();
+    updateStartDirection();
+    saveCurrentCourse();
+
+    addMode = null;
+    updateStartButtonState();
+  });
+}
+
+function useCoursePointForCalibration(point) {
+  if (!calibrationMode) return false;
+
+  saveCalibrationPoint(
+    calibrationMode,
+    L.latLng(point.lat, point.lon)
+  );
+
+  calibrationMode = null;
+
+  return true;
 }
 
 function shortenLineSegment(p1, p2, cut) {
@@ -1041,99 +1176,7 @@ function createStartIconTowards(startPoint, targetPoint, size = 34) {
   });
 }
 
-map.on('click', (e) => {
-  if (calibrationMode) {
-    saveCalibrationPoint(calibrationMode, e.latlng);
-    calibrationMode = null;
-    return;
-  }
 
-  if (!addMode) return;
-
-  const lat = e.latlng.lat;
-  const lon = e.latlng.lng;
-
-  const markerGroup = [];
-
-  if (addMode === "start") {
-    const marker = L.marker([lat, lon], { icon: createStartIcon() })
-      .addTo(map)
-      .bindPopup("Lähtö");
-
-    courseMarkers.push(marker);
-    markerGroup.push(marker);
-
-    coursePoints.push({
-      type: "start",
-      name: "Lähtö",
-      lat: lat,
-      lon: lon,
-      visited: false
-    });
-  }
-
-  if (addMode === "control") {
-    const name = "Rasti " + controlNumber;
-
-    const marker = L.marker([lat, lon], { icon: controlIcon })
-      .addTo(map)
-      .bindPopup(name);
-
-    courseMarkers.push(marker);
-    markerGroup.push(marker);
-
-    const numberIcon = L.divIcon({
-      className: 'control-number',
-      html: controlNumber,
-      iconSize: [34, 34],
-      iconAnchor: [-18, 18]
-    });
-
-    const numberMarker = L.marker([lat, lon], {
-      icon: numberIcon,
-      interactive: false
-    }).addTo(map);
-
-    courseMarkers.push(numberMarker);
-    markerGroup.push(numberMarker);
-
-    coursePoints.push({
-      type: "control",
-      name: name,
-      lat: lat,
-      lon: lon,
-      visited: false
-    });
-
-    controlNumber++;
-  }
-
-  if (addMode === "finish") {
-    const marker = L.marker([lat, lon], { icon: finishIcon })
-      .addTo(map)
-      .bindPopup("Maali");
-
-    courseMarkers.push(marker);
-    markerGroup.push(marker);
-
-    coursePoints.push({
-      type: "finish",
-      name: "Maali",
-      lat: lat,
-      lon: lon,
-      visited: false
-    });
-  }
-
-  coursePointMarkerGroups.push(markerGroup);
-
-	updateCourseLine();
-	updateStartDirection();
-	saveCurrentCourse();
-
-addMode = null;
-updateStartButtonState();
-});
 
 function isReadyToStart() {
   const hasMap = mapMode === "osm" || !!currentMapImageData;
@@ -1434,6 +1477,19 @@ function saveCalibrationPoint(label, mapLatLng) {
       updateStartButtonState();
       
 }
+
+function useCoursePointForCalibration(point) {
+  if (!calibrationMode) return false;
+
+  saveCalibrationPoint(
+    calibrationMode,
+    L.latLng(point.lat, point.lon)
+  );
+
+  calibrationMode = null;
+  return true;
+}
+
 function gpsToMeters(gps, refLat) {
   const metersPerDegLat = 110540;
   const metersPerDegLon = 111320 * Math.cos(refLat * Math.PI / 180);
@@ -1596,7 +1652,7 @@ function drawCourseFromPoints(points) {
         className: 'control-number',
         html: number || "",
         iconSize: [34, 34],
-        iconAnchor: [-18, 18]
+        iconAnchor: [-30, 16]
       });
 
       const numberMarker = L.marker([point.lat, point.lon], {
