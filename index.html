@@ -1269,7 +1269,9 @@ function isReadyToStart() {
   if (!hasControl) return "Rasti puuttuu";
   if (!hasFinish) return "Maali puuttuu";
   if (!hasGps) return "GPS-paikkaa ei ole vielä saatu";
-  if (!hasCalibration) return "GPS-kalibrointi A ja B puuttuu";
+  if (mapMode === "image" && !hasCalibration) {
+  return "GPS-kalibrointi A ja B puuttuu";
+}
 
   return null;
 }
@@ -1881,8 +1883,9 @@ function startGpsTracking() {
         }
       }
 
-      const mapPoint = gpsToMapPoint(realLat, realLon);
-
+        const mapPoint = mapMode === "image"
+          ? gpsToMapPoint(realLat, realLon)
+          : null;
       if (mapPoint) {
         document.getElementById('eventStatus').textContent =
           "GPS kartalla | tarkkuus " + Math.round(accuracy) + " m";
