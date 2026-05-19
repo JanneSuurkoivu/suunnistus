@@ -385,7 +385,7 @@ let courseLine = L.layerGroup().addTo(map);
 const CONTROL_HIT_RADIUS = 35;
 const MIN_ROUTE_POINT_DISTANCE = 3; // metriä
 const GPS_READY_ACCURACY = 10;
-
+const MAX_TRACK_ACCURACY = 12;
 
 let timerRunning = false;
 let startTime = null;
@@ -1745,6 +1745,12 @@ function startGpsTracking() {
       const realLat = position.coords.latitude;
       const realLon = position.coords.longitude;
       const accuracy = position.coords.accuracy;
+
+      if (accuracy > MAX_TRACK_ACCURACY) {
+  document.getElementById('eventStatus').textContent =
+    "GPS-piste hylätty, tarkkuus " + Math.round(accuracy) + " m";
+  return;
+} 
 
       if (accuracy <= GPS_READY_ACCURACY) {
         gpsReady = true;
