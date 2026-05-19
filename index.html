@@ -408,7 +408,10 @@ let calibration = {
   A: null,
   B: null
 };
-
+let calibrationMarkers = {
+  A: null,
+  B: null
+};
 
 
 let lastSavedRealGps = null;
@@ -433,6 +436,72 @@ reader.onload = () => {
 
 reader.readAsDataURL(file);
 });
+
+function createCalibrationIcon(label) {
+  return L.divIcon({
+    className: 'calibration-icon',
+    html: `
+      <div style="
+        position: relative;
+        width: 30px;
+        height: 30px;
+      ">
+
+        <!-- Pystyviiva -->
+        <div style="
+          position:absolute;
+          left:14px;
+          top:0;
+          width:2px;
+          height:30px;
+          background:#00aaff;
+        "></div>
+
+        <!-- Vaakaviiva -->
+        <div style="
+          position:absolute;
+          left:0;
+          top:14px;
+          width:30px;
+          height:2px;
+          background:#00aaff;
+        "></div>
+
+        <!-- Keskipiste -->
+        <div style="
+          position:absolute;
+          left:10px;
+          top:10px;
+          width:10px;
+          height:10px;
+          border-radius:50%;
+          background:#0066ff;
+          border:2px solid white;
+        "></div>
+
+        <!-- A/B kirjain -->
+        <div style="
+          position:absolute;
+          left:20px;
+          top:-6px;
+          color:#0066ff;
+          font-weight:bold;
+          font-size:14px;
+          text-shadow:
+            -1px -1px 0 white,
+             1px -1px 0 white,
+            -1px  1px 0 white,
+             1px  1px 0 white;
+        ">
+          ${label}
+        </div>
+
+      </div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+}
 
 function calculateCourseLength() {
   let total = 0;
@@ -618,6 +687,15 @@ function resetCalibration(message = "Kalibrointi tyhjennetty.") {
   localStorage.removeItem("suunnistus_calibration");
 
   document.getElementById('calibStatus').textContent = message;
+
+  Object.values(calibrationMarkers).forEach(marker => {
+  if (marker) map.removeLayer(marker);
+});
+
+calibrationMarkers = {
+  A: null,
+  B: null
+};
 }
 
 function recreateMapForImageMode() {
@@ -1473,6 +1551,18 @@ function saveCalibrationPoint(label, mapLatLng) {
     document.getElementById('calibStatus').textContent =
       "Kalibrointi valmis. GPS voidaan piirtää kartalle.";
   }
+  if (calibrationMarkers[label]) {
+  map.removeLayer(calibrationMarkers[label]);
+  }
+
+calibrationMarkers[label] = L.marker(
+  [mapLatLng.lat, mapLatLng.lng],
+  {
+    icon: createCalibrationIcon(label),
+    interactive: false
+  }
+).addTo(map);
+
       saveCalibrationToStorage();
       updateStartButtonState();
       
